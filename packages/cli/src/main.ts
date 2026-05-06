@@ -8,8 +8,9 @@
  */
 
 import { runPushCli } from "./push.ts";
+import { runInitCli } from "./init.ts";
 
-const VERSION = "0.1.0";
+const VERSION = "0.2.0";
 
 const HELP_TEXT = `takosumi-git ${VERSION}
 
@@ -19,11 +20,17 @@ USAGE:
   takosumi-git <command> [options]
 
 COMMANDS:
+  init        Scaffold .takosumi/manifest.yml and workflows in this repo
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
   serve       Run a webhook receiver that auto-pushes on git events (stub)
   history     Show manifest version history (stub)
   help        Show this help
   version     Print version
+
+INIT OPTIONS:
+  --cwd <dir>                  project root to scaffold into (default .)
+  --name <appname>             metadata.name in the manifest (default: basename of cwd)
+  --force                      overwrite existing .takosumi/manifest.yml
 
 PUSH OPTIONS:
   --endpoint <url>             takosumi kernel endpoint (or TAKOSUMI_ENDPOINT)
@@ -50,6 +57,9 @@ export async function run(args: readonly string[]): Promise<number> {
   if (first === "version" || first === "-v" || first === "--version") {
     Deno.stdout.writeSync(new TextEncoder().encode(`${VERSION}\n`));
     return 0;
+  }
+  if (first === "init") {
+    return await runInitCli(rest);
   }
   if (first === "push") {
     return await runPushCli(rest);

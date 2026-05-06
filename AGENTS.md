@@ -48,21 +48,64 @@ takosumi-git/
 
 ## JSR publish layout (planned)
 
-| Package                                 | Version | 内容                                                           |
-| --------------------------------------- | ------- | -------------------------------------------------------------- |
-| `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                    |
-| `@takos/takosumi-git-cli`               | 0.1.0   | CLI (`takosumi-git push` 実装済 / `serve` / `history` は stub) |
-| `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)       |
-| `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)    |
-| `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization               |
-| `@takos/takosumi-git`                   | 0.0.1   | umbrella (上記を re-export)                                    |
+| Package                                 | Version | 内容                                                                    |
+| --------------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                             |
+| `@takos/takosumi-git-cli`               | 0.2.0   | CLI (`takosumi-git init` / `push` 実装済 / `serve` / `history` は stub) |
+| `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)                |
+| `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)             |
+| `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization                        |
+| `@takos/takosumi-git`                   | 0.0.1   | umbrella (上記を re-export)                                             |
+
+## .takosumi/ project convention
+
+`.takosumi/` directory convention は **takosumi-git の正本**である。takosumi
+kernel は manifest を explicit path / HTTP body で受け取るのみで、file layout
+について opinion を持たない。`.takosumi/` を「Google Play 的に application
+として deploy できる」project layout として確立するのは本 product の責務である。
+
+Project layout:
+
+```
+<repo>/
+├── .takosumi/
+│   ├── manifest.yml         ← deploy intent (the only file submitted to takosumi)
+│   └── workflows/           ← workflow YAML referenced by compute.<name>.workflowRef
+│       └── *.yml
+```
+
+`compute.<name>.workflowRef: { file, job, artifact }` は takosumi-git の private
+extension。takosumi-git が parse / resolve に使い、kernel に submit する前に必ず
+strip する (kernel は unknown field として reject するため)。
+
+Quick start:
+
+```bash
+takosumi-git init                                              # .takosumi/ を scaffold
+$EDITOR .takosumi/manifest.yml                                 # resources / image URI policy を編集
+takosumi-git push --endpoint <url> --token <token>             # takosumi に投下
+```
+
+Note: `takosumi-git init` is the analog of the older `takosumi init --project`
+flow from the era when manifest auto-discovery lived in the takosumi kernel CLI.
+That auto-discovery has been removed from the kernel; the `.takosumi/`
+convention now lives here exclusively.
 
 ## 想定 CLI
 
 ```bash
+takosumi-git init [options]           # .takosumi/manifest.yml + workflows/build.yml を scaffold
 takosumi-git push [options]           # repo の .takosumi/manifest.yml + workflow を解決して takosumi に投下
 takosumi-git serve --webhook          # git webhook を受け、自動で push 実行 (stub)
 takosumi-git history                  # git history = manifest version 履歴を表示 (stub)
+```
+
+`init` の主な flag:
+
+```
+--cwd <dir>                  project root to scaffold into (default .)
+--name <appname>             metadata.name in the manifest (default: basename of cwd)
+--force                      overwrite existing .takosumi/manifest.yml
 ```
 
 `push` の主な flag:
