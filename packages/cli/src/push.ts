@@ -26,10 +26,13 @@
  *      manifest is printed to stdout).
  */
 
+import { createHash } from "node:crypto";
 import { parse as parseYaml, stringify as stringifyYaml } from "@std/yaml";
 import { dirname, isAbsolute, join, resolve } from "@std/path";
 import { parseArgs } from "@std/cli/parse-args";
 import {
+  type DeploymentProvenance,
+  type DeploymentResourceArtifactProvenance,
   type DeployMode,
   type ManifestEnvelope,
   postDeployment,
@@ -61,6 +64,12 @@ export interface PushOptions {
   readonly fetch?: typeof fetch;
   /** Injected for tests. Defaults to a real `Deno.Command`-backed executor. */
   readonly executorFactory?: (workflowDir: string) => StepExecutor;
+  /** Injected for tests. Defaults to local `git` commands. */
+  readonly git?: GitRunner;
+  /** Injected for tests. Defaults to `crypto.randomUUID`. */
+  readonly workflowRunIdFactory?: () => string;
+  /** Injected for tests. Defaults to current wall-clock time. */
+  readonly now?: () => string;
   /** Captures stdout for tests. Defaults to `Deno.stdout.writeSync`. */
   readonly stdout?: (text: string) => void;
 }
@@ -71,10 +80,15 @@ export interface PushResult {
     readonly resource: string;
     readonly artifact: ResolvedArtifact;
   }>;
+  readonly provenance?: DeploymentProvenance;
   readonly response?: { status: number; body: unknown };
 }
 
 export type ArtifactContract = "v0" | "v1" | "auto";
+export type GitRunner = (
+  args: readonly string[],
+  cwd: string,
+) => Promise<{ readonly code: number; readonly stdout: string }>;
 
 const DEFAULT_ARTIFACT_CONTRACT: ArtifactContract = "v1";
 const ARTIFACT_MARKER_PREFIX = "TAKOSUMI_ARTIFACT=";
@@ -279,6 +293,29 @@ function setResourceImage(
   (entry.spec as Record<string, unknown>).image = uri;
 }
 
+function setResourceProvenanceMetadata(
+  manifest: Record<string, unknown>,
+  index: number,
+  provenance: DeploymentResourceArtifactProvenance,
+  workflowRunId: string,
+  gitCommitSha: string | undefined,
+): void {
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return;
+  const entry = resources[index];
+  if (!isRecord(entry)) return;
+  const metadata = isRecord(entry.metadata) ? entry.metadata : {};
+  metadata.takosumiGitProvenance = {
+    kind: "takosumi-git.resource-provenance@v1",
+    provenanceDigest: digestJson(provenance),
+    workflowRunId,
+    ...(gitCommitSha ? { gitCommitSha } : {}),
+    artifactUri: provenance.artifactUri,
+    stepLogDigests: provenance.stepLogs.map((step) => step.stdoutDigest),
+  };
+  entry.metadata = metadata;
+}
+
 async function readYaml<T>(path: string): Promise<T> {
   const text = await Deno.readTextFile(path);
   return parseYaml(text) as T;
@@ -308,8 +345,17 @@ export async function push(options: PushOptions): Promise<PushResult> {
   const projectRoot = dirname(dirname(manifestPath)); // parent of `.takosumi/`
   const executorFactory = options.executorFactory ??
     ((_dir: string) => defaultStepExecutor(projectRoot));
+  const workflowRunId = options.workflowRunIdFactory?.() ??
+    `takosumi-git:run:${crypto.randomUUID()}`;
+  const generatedAt = options.now?.() ?? new Date().toISOString();
+  const git = await collectGitMetadata(
+    projectRoot,
+    options.event,
+    options.git ?? defaultGitRunner,
+  );
 
   const resolved: { resource: string; artifact: ResolvedArtifact }[] = [];
+  const resourceProvenance: DeploymentResourceArtifactProvenance[] = [];
 
   for (const entry of entries) {
     const workflowPath = join(workflowsDir, entry.workflowRef.file);
@@ -327,10 +373,19 @@ export async function push(options: PushOptions): Promise<PushResult> {
     // step's last line. We wrap the executor to push outcomes into this
     // buffer in execution order.
     const stepStdouts: string[] = [];
+    const stepLogProvenance: DeploymentResourceArtifactProvenance[
+      "stepLogs"
+    ][number][] = [];
     const baseExecutor = executorFactory(projectRoot);
     const wrappedExecutor: StepExecutor = async (run, ctx) => {
       const outcome = await baseExecutor(run, ctx);
       stepStdouts.push(outcome.stdout);
+      stepLogProvenance.push({
+        stepName: ctx.step,
+        exitCode: outcome.exitCode,
+        stdoutDigest: digestText(outcome.stdout),
+        stdoutBytes: new TextEncoder().encode(outcome.stdout).byteLength,
+      });
       return outcome;
     };
 
@@ -365,17 +420,54 @@ export async function push(options: PushOptions): Promise<PushResult> {
     }
 
     setResourceImage(manifest, entry.index, result.artifact.uri);
+    const provenance: DeploymentResourceArtifactProvenance = {
+      resourceName: entry.name,
+      artifactName: result.artifact.name,
+      artifactUri: result.artifact.uri,
+      ...(result.artifact.digest
+        ? { artifactDigest: result.artifact.digest }
+        : {}),
+      workflow: {
+        file: entry.workflowRef.file,
+        job: entry.workflowRef.job,
+        artifact: entry.workflowRef.artifact,
+      },
+      stepLogs: stepLogProvenance,
+    };
+    setResourceProvenanceMetadata(
+      manifest,
+      entry.index,
+      provenance,
+      workflowRunId,
+      git.commitSha,
+    );
     resolved.push({ resource: entry.name, artifact: result.artifact });
+    resourceProvenance.push(provenance);
   }
 
   stripWorkflowRefs(manifest);
+  const provenance = resourceProvenance.length > 0
+    ? {
+      kind: "takosumi-git.deployment-provenance@v1" as const,
+      workflowRunId,
+      generatedAt,
+      event: serializableEvent(
+        options.event ?? {
+          kind: "manual",
+          source: "takosumi-git push",
+        },
+      ),
+      git: stripUndefined(git),
+      resourceArtifacts: resourceProvenance,
+    }
+    : undefined;
 
   if (options.dryRun) {
     stdout(
       `# takosumi-git push --dry-run\n# resolved ${resolved.length} resource(s)\n`,
     );
     stdout(stringifyYaml(manifest));
-    return { manifest, resolved };
+    return { manifest, resolved, ...(provenance ? { provenance } : {}) };
   }
 
   const response = await postDeployment(
@@ -387,10 +479,139 @@ export async function push(options: PushOptions): Promise<PushResult> {
     {
       mode: options.mode,
       manifest: manifest as unknown as ManifestEnvelope,
+      ...(provenance ? { provenance } : {}),
     },
   );
 
-  return { manifest, resolved, response };
+  return {
+    manifest,
+    resolved,
+    ...(provenance ? { provenance } : {}),
+    response,
+  };
+}
+
+async function defaultGitRunner(
+  args: readonly string[],
+  cwd: string,
+): Promise<{ readonly code: number; readonly stdout: string }> {
+  try {
+    const command = new Deno.Command("git", {
+      args: [...args],
+      cwd,
+      stdout: "piped",
+      stderr: "null",
+    });
+    const output = await command.output();
+    return {
+      code: output.code,
+      stdout: new TextDecoder().decode(output.stdout),
+    };
+  } catch {
+    return { code: 1, stdout: "" };
+  }
+}
+
+async function collectGitMetadata(
+  projectRoot: string,
+  event: WorkflowEvent | undefined,
+  git: GitRunner,
+): Promise<{
+  readonly repository?: string;
+  readonly repositoryUrl?: string;
+  readonly ref?: string;
+  readonly commitSha?: string;
+}> {
+  const payload = isRecord(event?.payload) ? event.payload : undefined;
+  const eventCommit = readString(payload?.commit);
+  const eventRef = readString(payload?.ref);
+  const eventRepository = readString(payload?.repository) ??
+    readString(payload?.repo);
+  const eventRepositoryUrl = readString(payload?.repositoryUrl) ??
+    readString(payload?.remoteUrl);
+  const [commitSha, ref, repositoryUrl] = await Promise.all([
+    eventCommit ? Promise.resolve(eventCommit) : gitString(git, projectRoot, [
+      "rev-parse",
+      "HEAD",
+    ]),
+    eventRef ? Promise.resolve(eventRef) : gitString(git, projectRoot, [
+      "rev-parse",
+      "--abbrev-ref",
+      "HEAD",
+    ]),
+    eventRepositoryUrl
+      ? Promise.resolve(eventRepositoryUrl)
+      : gitString(git, projectRoot, [
+        "config",
+        "--get",
+        "remote.origin.url",
+      ]),
+  ]);
+  return stripUndefined({
+    repository: eventRepository,
+    repositoryUrl: repositoryUrl || undefined,
+    ref: ref || undefined,
+    commitSha: commitSha || undefined,
+  });
+}
+
+async function gitString(
+  git: GitRunner,
+  cwd: string,
+  args: readonly string[],
+): Promise<string | undefined> {
+  const result = await git(args, cwd);
+  if (result.code !== 0) return undefined;
+  const value = result.stdout.trim();
+  return value.length > 0 ? value : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function serializableEvent(event: WorkflowEvent): Record<string, unknown> {
+  return stripUndefined({
+    kind: event.kind,
+    source: event.source,
+    ...(event.payload ? { payload: event.payload } : {}),
+  });
+}
+
+function stripUndefined<T extends Record<string, unknown>>(input: T): T {
+  const output: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== undefined) output[key] = value;
+  }
+  return output as T;
+}
+
+function digestText(text: string): `sha256:${string}` {
+  return `sha256:${createHash("sha256").update(text).digest("hex")}`;
+}
+
+function digestJson(value: unknown): `sha256:${string}` {
+  return `sha256:${
+    createHash("sha256").update(JSON.stringify(canonicalize(value))).digest(
+      "hex",
+    )
+  }`;
+}
+
+function canonicalize(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    const output: Record<string, unknown> = {};
+    for (const key of Object.keys(object).sort()) {
+      const canonical = canonicalize(object[key]);
+      if (canonical !== undefined) output[key] = canonical;
+    }
+    return output;
+  }
+  return value;
 }
 
 const DEFAULT_MANIFEST = ".takosumi/manifest.yml";

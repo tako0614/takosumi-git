@@ -90,5 +90,8 @@ deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push \
   --token "$TAKOSUMI_TOKEN"
 ```
 
-`push` sends only the cleaned Takosumi v1 manifest to `POST /v1/deployments`.
-The kernel never receives `.takosumi/workflows/*.yml` or `workflowRef`.
+`push` sends the cleaned Takosumi v1 manifest and an opaque
+`takosumi-git.deployment-provenance@v1` chain to `POST /v1/deployments`. The
+kernel never receives `.takosumi/workflows/*.yml` or `workflowRef`, and it does
+not execute or interpret workflows; it only records the provenance JSON for
+audit.

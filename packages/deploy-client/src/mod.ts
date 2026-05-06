@@ -33,6 +33,49 @@ export interface ManifestEnvelope {
 export interface DeployRequest {
   readonly mode: DeployMode;
   readonly manifest: ManifestEnvelope;
+  /**
+   * Opaque upstream provenance recorded by the Takosumi kernel WAL.
+   *
+   * `takosumi-git` owns workflow / git semantics. The kernel does not execute
+   * or interpret workflows, but it can persist this JSON chain so operators can
+   * trace a deployed artifact back to a workflow run, git commit, and step log
+   * digest set.
+   */
+  readonly provenance?: DeploymentProvenance;
+}
+
+export interface DeploymentProvenance {
+  readonly kind: "takosumi-git.deployment-provenance@v1";
+  readonly workflowRunId: string;
+  readonly generatedAt: string;
+  readonly event?: Record<string, unknown>;
+  readonly git?: {
+    readonly repository?: string;
+    readonly repositoryUrl?: string;
+    readonly ref?: string;
+    readonly commitSha?: string;
+  };
+  readonly resourceArtifacts: readonly DeploymentResourceArtifactProvenance[];
+}
+
+export interface DeploymentResourceArtifactProvenance {
+  readonly resourceName: string;
+  readonly artifactName: string;
+  readonly artifactUri: string;
+  readonly artifactDigest?: string;
+  readonly workflow: {
+    readonly file: string;
+    readonly job: string;
+    readonly artifact: string;
+  };
+  readonly stepLogs: readonly DeploymentStepLogProvenance[];
+}
+
+export interface DeploymentStepLogProvenance {
+  readonly stepName: string;
+  readonly exitCode: number;
+  readonly stdoutDigest: `sha256:${string}`;
+  readonly stdoutBytes: number;
 }
 
 export interface DeployClientOptions {

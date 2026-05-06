@@ -46,8 +46,11 @@ resources:
 5. It resolves the job artifact URI according to
    [Artifact URI Contract](./artifact-contract.md).
 6. It writes the URI to `resources[i].spec.image`.
-7. It deletes `workflowRef` from every resource entry.
-8. It submits the cleaned manifest to the kernel unless `--dry-run` was passed.
+7. It adds resource-level `metadata.takosumiGitProvenance` with digests for the
+   resolved artifact chain.
+8. It deletes `workflowRef` from every resource entry.
+9. It submits the cleaned manifest plus top-level deployment provenance to the
+   kernel unless `--dry-run` was passed.
 
 Resource entries without `workflowRef` are left unchanged.
 
@@ -60,13 +63,26 @@ resources:
   - name: web
     shape: web-service@v1
     provider: "@takos/aws-fargate"
-    spec:
-      port: 8080
-      image: ghcr.io/example/demo@sha256:0123456789abcdef
+        spec:
+          port: 8080
+          image: ghcr.io/example/demo@sha256:0123456789abcdef
+        metadata:
+          takosumiGitProvenance:
+            kind: takosumi-git.resource-provenance@v1
+            provenanceDigest: sha256:...
+            workflowRunId: takosumi-git:run:...
+            gitCommitSha: 0123456789abcdef0123456789abcdef01234567
+            artifactUri: ghcr.io/example/demo@sha256:0123456789abcdef
+            stepLogDigests:
+              - sha256:...
 ```
 
-It does not know the workflow file, job name, artifact name, git repository, or
-build logs. Build and git concerns stay in takosumi-git.
+The kernel also receives an optional top-level
+`takosumi-git.deployment-provenance@v1` JSON object containing the workflow run
+id, git metadata, artifact URI, and per-step stdout digests. That payload is
+opaque audit evidence: the kernel records it in its WAL but does not load
+workflow files, execute jobs, parse build logs, or interpret git semantics.
+Build and git concerns stay in takosumi-git.
 
 ## Validation and Errors
 

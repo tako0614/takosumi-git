@@ -10,12 +10,16 @@ and the takosumi manifest deploy engine.
 2. Runs the build pipeline declared under `.takosumi/workflows/` (image build,
    artifact upload).
 3. Resolves artifact URIs and generates a `Manifest` document.
-4. Submits the manifest to a takosumi kernel via `POST /v1/deployments`.
+4. Submits the manifest and opaque deployment provenance to a takosumi kernel
+   via `POST /v1/deployments`.
 5. Treats the git history of the manifest as the authoritative version history.
 
 The takosumi kernel itself remains a pure manifest deploy engine — it never sees
-git, never schedules anything, never runs workflow steps. All workflow concerns
-live on this side of the `POST /v1/deployments` boundary.
+workflow definitions, never schedules anything, never runs workflow steps, and
+never interprets git semantics. `takosumi-git` may attach an opaque
+`takosumi-git.deployment-provenance@v1` JSON chain so the kernel WAL can record
+which workflow run, git commit, artifact URI, and step log digests produced the
+deployed manifest.
 
 ## Quick start
 
@@ -38,9 +42,10 @@ parses `.takosumi/manifest.yml` (a takosumi v1 manifest envelope), resolves each
 `resources[i].workflowRef` by running the referenced workflow job's steps (via
 `bash -lc`) and reading the v1 `TAKOSUMI_ARTIFACT=<uri>` stdout marker,
 substitutes the resolved artifact URI into that resource entry's `spec.image`
-field, strips the private `workflowRef` extension, and posts the cleaned
-manifest to a takosumi kernel via `POST /v1/deployments`. `history` lists
-manifest commits and renders per-resource semantic diffs. `serve` (webhook
+field, strips the private `workflowRef` extension, attaches resource-level
+provenance metadata plus a top-level deployment provenance chain, and posts the
+cleaned manifest to a takosumi kernel via `POST /v1/deployments`. `history`
+lists manifest commits and renders per-resource semantic diffs. `serve` (webhook
 receiver) remains a stub. See [AGENTS.md](./AGENTS.md) for package layout and
 design boundaries.
 

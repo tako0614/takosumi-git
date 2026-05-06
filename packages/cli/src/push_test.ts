@@ -2,7 +2,7 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import { stringify as stringifyYaml } from "@std/yaml";
 import { join } from "@std/path";
 import type { StepExecutor } from "@takos/takosumi-git-workflow-runner";
-import { parsePushArgs, push } from "./push.ts";
+import { type GitRunner, parsePushArgs, push } from "./push.ts";
 
 interface Project {
   readonly root: string;
@@ -47,6 +47,26 @@ const fakeLegacyOk: StepExecutor = (_run, _ctx) =>
     stdout: "build complete\nghcr.io/example/app@sha256:deadbeef\n",
     exitCode: 0,
   });
+
+const fakeGit: GitRunner = (args) => {
+  const key = args.join(" ");
+  if (key === "rev-parse HEAD") {
+    return Promise.resolve({
+      code: 0,
+      stdout: "0123456789abcdef0123456789abcdef01234567\n",
+    });
+  }
+  if (key === "rev-parse --abbrev-ref HEAD") {
+    return Promise.resolve({ code: 0, stdout: "main\n" });
+  }
+  if (key === "config --get remote.origin.url") {
+    return Promise.resolve({
+      code: 0,
+      stdout: "https://github.com/acme/demo.git\n",
+    });
+  }
+  return Promise.resolve({ code: 1, stdout: "" });
+};
 
 Deno.test("push --dry-run resolves workflowRef into spec.image and strips workflowRef", async () => {
   const project = await makeProject({
@@ -99,6 +119,9 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
       mode: "apply",
       dryRun: true,
       executorFactory: () => fakeOk,
+      workflowRunIdFactory: () => "takosumi-git:run:test",
+      now: () => "2026-05-07T00:00:00.000Z",
+      git: fakeGit,
       stdout: (s) => {
         dryRunOutput += s;
       },
@@ -113,7 +136,17 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
     >;
     const web = resources[0];
     const spec = web.spec as Record<string, unknown>;
+    const metadata = web.metadata as Record<string, unknown>;
+    const provenance = metadata.takosumiGitProvenance as Record<
+      string,
+      unknown
+    >;
     assertEquals(spec.image, "ghcr.io/example/app@sha256:deadbeef");
+    assertEquals(provenance.workflowRunId, "takosumi-git:run:test");
+    assertEquals(
+      provenance.gitCommitSha,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
     assert(!("workflowRef" in web), "workflowRef must be stripped");
     assertEquals(result.resolved.length, 1);
     assertEquals(result.resolved[0].resource, "web");
@@ -173,6 +206,9 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
       mode: "apply",
       dryRun: false,
       executorFactory: () => fakeOk,
+      workflowRunIdFactory: () => "takosumi-git:run:post-test",
+      now: () => "2026-05-07T00:00:00.000Z",
+      git: fakeGit,
       stdout: () => {},
       fetch: ((url: string | URL | Request, init?: RequestInit) => {
         postedUrl = url.toString();
@@ -189,12 +225,48 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
     assertEquals(postedAuth, "Bearer secret");
     const body = postedBody as {
       mode: string;
+      provenance: {
+        workflowRunId: string;
+        git: { commitSha: string };
+        resourceArtifacts: Array<{
+          resourceName: string;
+          artifactUri: string;
+          stepLogs: Array<{ stepName: string; stdoutDigest: string }>;
+        }>;
+      };
       manifest: { resources: Array<Record<string, unknown>> };
     };
     assertEquals(body.mode, "apply");
+    assertEquals(body.provenance.workflowRunId, "takosumi-git:run:post-test");
+    assertEquals(
+      body.provenance.git.commitSha,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+    assertEquals(body.provenance.resourceArtifacts[0].resourceName, "api");
+    assertEquals(
+      body.provenance.resourceArtifacts[0].artifactUri,
+      "ghcr.io/example/app@sha256:deadbeef",
+    );
+    assertEquals(
+      body.provenance.resourceArtifacts[0].stepLogs[0].stepName,
+      "build",
+    );
+    assert(
+      body.provenance.resourceArtifacts[0].stepLogs[0].stdoutDigest
+        .startsWith("sha256:"),
+    );
     const api = body.manifest.resources[0];
     const spec = api.spec as Record<string, unknown>;
+    const metadata = api.metadata as Record<string, unknown>;
+    const resourceProvenance = metadata.takosumiGitProvenance as Record<
+      string,
+      unknown
+    >;
     assertEquals(spec.image, "ghcr.io/example/app@sha256:deadbeef");
+    assertEquals(
+      resourceProvenance.workflowRunId,
+      "takosumi-git:run:post-test",
+    );
     assert(
       !("workflowRef" in api),
       "workflowRef must be stripped from POST body",

@@ -5,7 +5,8 @@
 This document defines how `takosumi-git push` resolves a workflow output into
 the artifact URI that is written into the Takosumi manifest. The Takosumi kernel
 does not run builds, read workflow files, or interpret `workflowRef`; it only
-receives the cleaned manifest over `POST /v1/deployments`.
+receives the cleaned manifest plus opaque deploy provenance over
+`POST /v1/deployments`.
 
 ## Scope
 
@@ -91,6 +92,22 @@ before that separator. Printing a URI to stderr does not satisfy this contract.
 `--dry-run` still executes the workflow and resolves the URI, but it prints the
 cleaned manifest instead of sending `POST /v1/deployments`.
 
+## Provenance Chain
+
+For every resolved artifact, `takosumi-git push` records:
+
+- workflow run id (`takosumi-git:run:<uuid>`)
+- git repository / ref / commit metadata when available
+- resource name, workflow file/job/artifact, resolved artifact URI, and optional
+  artifact digest
+- per-step stdout digest, byte count, exit code, and step name
+
+The resource receives `metadata.takosumiGitProvenance` with the workflow run id,
+git commit SHA, artifact URI, provenance digest, and step log digests. The
+`POST /v1/deployments` body also includes a top-level
+`takosumi-git.deployment-provenance@v1` object. The Takosumi kernel persists
+that JSON as opaque WAL evidence; it does not execute or interpret the workflow.
+
 ## Stability
 
 v1 is the default artifact URI contract. v0 remains a legacy resolver for the
@@ -101,7 +118,7 @@ or `--artifact-contract auto`.
 
 - Source of truth: `packages/cli/src/push.ts` (`artifactContractResolver`,
   `lastLineArtifactResolver`, `parseArtifactContract`, `setResourceImage`,
-  `stripWorkflowRefs`).
+  `setResourceProvenanceMetadata`, `stripWorkflowRefs`).
 - Contract types: `packages/workflow-contract/src/mod.ts` (`ComputeWorkflowRef`,
   `ResolvedArtifact`, `WorkflowJobSpec`).
 - Tests: `packages/cli/src/push_test.ts` and `docs/artifact-contract_test.ts`.
