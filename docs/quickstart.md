@@ -1,6 +1,6 @@
 # Quickstart
 
-> Stability: v0 Audience: workflow author Owner: takosumi-git
+> Stability: v1 Audience: workflow author Owner: takosumi-git
 
 This quickstart uses the source checkout. After the JSR publish step lands, the
 same flow should work through
@@ -48,10 +48,10 @@ resources:
 
 See [WorkflowRef](./workflow-ref.md) for the field contract.
 
-## 3. Make the Workflow Print an Artifact URI
+## 3. Make the Workflow Print an Artifact URI Marker
 
-Open `.takosumi/workflows/build.yml`. For artifact URI v0, the successful
-workflow must print the resolved URI as the final non-empty stdout line:
+Open `.takosumi/workflows/build.yml`. Artifact URI v1 is the default contract:
+the successful workflow must print `TAKOSUMI_ARTIFACT=<uri>` to stdout.
 
 ```yaml
 version: "0"
@@ -62,13 +62,13 @@ jobs:
         run: |
           docker build -t ghcr.io/example/demo:${GIT_SHA} .
           docker push ghcr.io/example/demo:${GIT_SHA}
-          echo "ghcr.io/example/demo@sha256:0123456789abcdef"
+          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/demo@sha256:0123456789abcdef"
     artifact:
       name: image
 ```
 
-See [Artifact URI Contract](./artifact-contract.md) for exact stdout and failure
-semantics.
+See [Artifact URI Contract](./artifact-contract.md) for v1 marker, legacy v0,
+and failure semantics.
 
 ## 4. Dry Run
 

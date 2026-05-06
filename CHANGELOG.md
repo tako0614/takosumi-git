@@ -3,6 +3,16 @@
 All notable changes to `takosumi-git` are recorded here. The CLI version follows
 the package version of `@takos/takosumi-git-cli`.
 
+## Unreleased
+
+- Added artifact URI contract v1: workflow steps now print
+  `TAKOSUMI_ARTIFACT=<uri>` and `takosumi-git push` resolves that marker by
+  default.
+- Added `--artifact-contract v0|v1|auto`; v0 keeps the last non-empty stdout
+  line resolver as an explicit legacy mode, and `auto` tries v1 before v0.
+- Updated `takosumi-git init`, README, quickstart, and artifact contract docs to
+  generate and document v1 marker output.
+
 ## 0.3.0
 
 - Aligned `takosumi-git push` with the takosumi v1 manifest envelope. The

@@ -11,10 +11,9 @@
  *      read the referenced workflow file under `.takosumi/workflows/`.
  *   3. Run the named job's steps as subprocesses (`bash -lc <run>`),
  *      capturing each step's stdout.
- *   4. Resolve the artifact URI: **the last successful step's last
- *      stdout line is taken as the artifact URI**. This is the v0
- *      contract — explicit, simple, and easy to produce from any build
- *      script (`echo "ghcr.io/foo/bar@sha256:..."` as the final line).
+ *   4. Resolve the artifact URI. The default v1 contract scans successful
+ *      step stdout for `TAKOSUMI_ARTIFACT=<uri>`. v0 remains available as a
+ *      legacy fallback via `--artifact-contract v0` or auto-detection.
  *   5. Substitute the resolved URI into the corresponding
  *      `resources[i].spec.image` field. takosumi requires a digest-pinned
  *      URI, but we do not enforce that here — it is the workflow's
@@ -56,6 +55,7 @@ export interface PushOptions {
   readonly workflowsDir: string;
   readonly mode: DeployMode;
   readonly dryRun: boolean;
+  readonly artifactContract?: ArtifactContract;
   /** Injected for tests. Defaults to global `fetch`. */
   readonly fetch?: typeof fetch;
   /** Injected for tests. Defaults to a real `Deno.Command`-backed executor. */
@@ -73,6 +73,11 @@ export interface PushResult {
   readonly response?: { status: number; body: unknown };
 }
 
+export type ArtifactContract = "v0" | "v1" | "auto";
+
+const DEFAULT_ARTIFACT_CONTRACT: ArtifactContract = "v1";
+const ARTIFACT_MARKER_PREFIX = "TAKOSUMI_ARTIFACT=";
+
 /** Default executor: spawns `bash -lc <run>` from `cwd`. */
 export function defaultStepExecutor(cwd: string): StepExecutor {
   return async (run, _ctx): Promise<StepOutcome> => {
@@ -87,49 +92,119 @@ export function defaultStepExecutor(cwd: string): StepExecutor {
     const out = decoder.decode(stdout);
     const err = decoder.decode(stderr);
     // Surface stderr by appending it to stdout for log capture; downstream
-    // last-line logic only looks at the trailing non-empty line of stdout
-    // proper, so we keep them separated by a marker.
+    // artifact resolution only reads stdout proper, so we keep them separated
+    // by a marker.
     const merged = err.length > 0 ? `${out}\n[stderr]\n${err}` : out;
     return { stdout: merged, exitCode: code };
   };
 }
 
-function lastNonEmptyLine(text: string): string | null {
+function stdoutLines(text: string): string[] {
   // Only consider the first segment before our `[stderr]` marker.
   const stdoutOnly = text.split("\n[stderr]\n")[0] ?? text;
-  const lines = stdoutOnly.split("\n").map((l) => l.trim()).filter((l) =>
+  return stdoutOnly.split("\n").map((l) => l.trim()).filter((l) =>
     l.length > 0
   );
+}
+
+function lastNonEmptyLine(text: string): string | null {
+  const lines = stdoutLines(text);
   return lines.length > 0 ? lines[lines.length - 1] : null;
 }
 
+type MarkerResult =
+  | { readonly found: true; readonly uri: string }
+  | { readonly found: false };
+
+function artifactMarkerLine(text: string): MarkerResult {
+  const lines = stdoutLines(text);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.startsWith(ARTIFACT_MARKER_PREFIX)) continue;
+    const uri = line.slice(ARTIFACT_MARKER_PREFIX.length).trim();
+    if (!uri) {
+      throw new Error(
+        `${ARTIFACT_MARKER_PREFIX}<uri> marker must include a URI`,
+      );
+    }
+    return { found: true, uri };
+  }
+  return { found: false };
+}
+
+function findArtifactMarker(logs: readonly string[]): MarkerResult {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const marker = artifactMarkerLine(logs[i]);
+    if (marker.found) return marker;
+  }
+  return { found: false };
+}
+
+function findLegacyStdoutArtifact(logs: readonly string[]): string | null {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const line = lastNonEmptyLine(logs[i]);
+    if (line) return line;
+  }
+  return null;
+}
+
+function resolveArtifactUri(
+  logs: readonly string[],
+  jobName: string,
+  contract: ArtifactContract,
+): string {
+  if (contract === "v1" || contract === "auto") {
+    const marker = findArtifactMarker(logs);
+    if (marker.found) return marker.uri;
+    if (contract === "v1") {
+      throw new Error(
+        `workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI`,
+      );
+    }
+  }
+
+  const legacy = findLegacyStdoutArtifact(logs);
+  if (legacy) return legacy;
+  if (contract === "auto") {
+    throw new Error(
+      `workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker or stdout artifact; cannot resolve artifact URI`,
+    );
+  }
+  throw new Error(
+    `workflow job '${jobName}' produced no stdout; cannot resolve artifact URI`,
+  );
+}
+
 /**
- * ArtifactResolver factory that returns a resolver capturing the **last
- * non-empty stdout line of the final step's output** as the artifact URI.
+ * ArtifactResolver factory that implements the selected artifact URI contract.
+ */
+export function artifactContractResolver(
+  capturedLogs: () => readonly string[],
+  ref: ComputeWorkflowRef,
+  contract: ArtifactContract,
+): ArtifactResolver {
+  return (job: WorkflowJobSpec, _event: WorkflowEvent) => {
+    const logs = capturedLogs();
+    try {
+      return Promise.resolve({
+        name: job.artifact?.name ?? ref.artifact,
+        uri: resolveArtifactUri(logs, job.name, contract),
+      });
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  };
+}
+
+/**
+ * Legacy v0 resolver: captures the last non-empty stdout line as the artifact
+ * URI. Prefer `artifactContractResolver(..., "v1")` for new workflows.
  */
 export function lastLineArtifactResolver(
   capturedLogs: () => readonly string[],
   ref: ComputeWorkflowRef,
 ): ArtifactResolver {
-  return (job: WorkflowJobSpec, _event: WorkflowEvent) => {
-    const logs = capturedLogs();
-    // Walk backwards through captured stdout chunks and find the last
-    // non-empty line. The runner pushes one stdout chunk per step.
-    for (let i = logs.length - 1; i >= 0; i--) {
-      const line = lastNonEmptyLine(logs[i]);
-      if (line) {
-        return Promise.resolve({
-          name: job.artifact?.name ?? ref.artifact,
-          uri: line,
-        });
-      }
-    }
-    return Promise.reject(
-      new Error(
-        `workflow job '${job.name}' produced no stdout; cannot resolve artifact URI`,
-      ),
-    );
-  };
+  return artifactContractResolver(capturedLogs, ref, "v0");
 }
 
 interface ResourceEntry {
@@ -221,6 +296,8 @@ export async function push(options: PushOptions): Promise<PushResult> {
   });
   const manifestPath = resolve(options.manifestPath);
   const workflowsDir = resolveWorkflowDir(options.workflowsDir);
+  const artifactContract = options.artifactContract ??
+    DEFAULT_ARTIFACT_CONTRACT;
 
   const manifest = await readYaml<Record<string, unknown>>(manifestPath);
   if (!isRecord(manifest)) {
@@ -266,9 +343,10 @@ export async function push(options: PushOptions): Promise<PushResult> {
       job: entry.workflowRef.job,
       event,
       executor: wrappedExecutor,
-      resolveArtifact: lastLineArtifactResolver(
+      resolveArtifact: artifactContractResolver(
         () => stepStdouts,
         entry.workflowRef,
+        artifactContract,
       ),
     });
 
@@ -324,6 +402,14 @@ export interface ParsedPushArgs {
   readonly workflowsDir: string;
   readonly mode: DeployMode;
   readonly dryRun: boolean;
+  readonly artifactContract: ArtifactContract;
+}
+
+export function parseArtifactContract(raw: unknown): ArtifactContract {
+  if (raw === "v0" || raw === "v1" || raw === "auto") return raw;
+  throw new Error(
+    `--artifact-contract must be one of v0|v1|auto (got '${String(raw)}')`,
+  );
 }
 
 export function parsePushArgs(
@@ -331,13 +417,21 @@ export function parsePushArgs(
   env: { get(key: string): string | undefined } = Deno.env,
 ): ParsedPushArgs {
   const flags = parseArgs(args as string[], {
-    string: ["endpoint", "token", "manifest", "workflows-dir", "mode"],
+    string: [
+      "endpoint",
+      "token",
+      "manifest",
+      "workflows-dir",
+      "mode",
+      "artifact-contract",
+    ],
     boolean: ["dry-run"],
     alias: {},
     default: {
       manifest: DEFAULT_MANIFEST,
       "workflows-dir": DEFAULT_WORKFLOWS_DIR,
       mode: "apply",
+      "artifact-contract": DEFAULT_ARTIFACT_CONTRACT,
       "dry-run": false,
     },
   });
@@ -369,6 +463,7 @@ export function parsePushArgs(
     workflowsDir: flags["workflows-dir"] as string,
     mode,
     dryRun,
+    artifactContract: parseArtifactContract(flags["artifact-contract"]),
   };
 }
 

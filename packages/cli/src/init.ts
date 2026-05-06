@@ -70,13 +70,12 @@ jobs:
   - name: build
     steps:
       - name: build-and-push
-        # takosumi-git captures the LAST non-empty stdout line as the
-        # artifact URI. Make sure your build script ends by echoing the
-        # digest-pinned image URI (e.g. ghcr.io/<org>/<app>@sha256:...).
+        # Artifact URI contract v1: print TAKOSUMI_ARTIFACT=<uri> on stdout.
+        # Use a digest-pinned image URI (e.g. ghcr.io/<org>/<app>@sha256:...).
         run: |
           # docker buildx build --push -t ghcr.io/<org>/<app>:latest .
           # docker images --no-trunc --quiet ghcr.io/<org>/<app>:latest
-          echo "ghcr.io/example/app@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     artifact:
       name: image
 `;

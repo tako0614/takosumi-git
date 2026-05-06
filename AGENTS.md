@@ -120,15 +120,16 @@ takosumi-git history                  # git history = manifest version 履歴を
 --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
 --workflows-dir <path>       workflows dir (default .takosumi/workflows)
 --mode <apply|plan|destroy>  deploy mode (default apply)
+--artifact-contract <v0|v1|auto> artifact URI resolver (default v1)
 --dry-run                    workflow を実行するが POST はせず resolved manifest を出力
 ```
 
 `resources[i].workflowRef: { file, job, artifact }` は takosumi-git
 の私的拡張で、 kernel に submit する前に必ず strip される (kernel の
 `ManifestResource` は closed shape)。解決後の URI は同 entry の `spec.image`
-に書き込まれる。artifact URI 自体は v0 contract として **last successful step
-の最後の非空 stdout 行** を採用する (workflow 側で
-`echo "ghcr.io/foo/bar@sha256:..."` を最終行に出力する想定)。詳細は
+に書き込まれる。artifact URI は v1 contract として `TAKOSUMI_ARTIFACT=<uri>`
+stdout marker を採用する。v0 の最後の非空 stdout 行 contract は
+`--artifact-contract v0` / `auto` で legacy fallback として残す。詳細は
 [`docs/artifact-contract.md`](./docs/artifact-contract.md) を参照。
 
 ## Lint / Format / Test 共通設定

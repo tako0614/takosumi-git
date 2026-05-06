@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 const root = new URL("../", import.meta.url);
 
-Deno.test("artifact contract documents the v0 stdout resolver", async () => {
+Deno.test("artifact contract documents v1 marker resolver and v0 fallback", async () => {
   const doc = await read("docs/artifact-contract.md");
   const pushSource = await read("packages/cli/src/push.ts");
 
@@ -10,10 +10,14 @@ Deno.test("artifact contract documents the v0 stdout resolver", async () => {
     const snippet of [
       "resources[i].workflowRef",
       "resources[i].spec.image",
+      "TAKOSUMI_ARTIFACT=<uri>",
       "final non-empty stdout line",
       "[stderr]",
+      "workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI",
       "workflow job '<job>' produced no stdout; cannot resolve artifact URI",
+      "artifactContractResolver",
       "lastLineArtifactResolver",
+      "parseArtifactContract",
       "stripWorkflowRefs",
     ]
   ) {
@@ -22,10 +26,14 @@ Deno.test("artifact contract documents the v0 stdout resolver", async () => {
 
   for (
     const snippet of [
+      "ARTIFACT_MARKER_PREFIX",
+      "artifactContractResolver",
       "lastLineArtifactResolver",
+      "parseArtifactContract",
       "setResourceImage",
       "stripWorkflowRefs",
-      "workflow job '${job.name}' produced no stdout; cannot resolve artifact URI",
+      "workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI",
+      "workflow job '${jobName}' produced no stdout; cannot resolve artifact URI",
     ]
   ) {
     assert.ok(pushSource.includes(snippet), `source missing ${snippet}`);

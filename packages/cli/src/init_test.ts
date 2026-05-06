@@ -54,6 +54,7 @@ Deno.test("init scaffolds .takosumi/manifest.yml and workflows/build.yml", async
     const workflow = await Deno.readTextFile(result.workflowPath);
     assertStringIncludes(workflow, 'version: "0"');
     assertStringIncludes(workflow, "name: build");
+    assertStringIncludes(workflow, "TAKOSUMI_ARTIFACT=");
     assertStringIncludes(workflow, "artifact:");
     assertStringIncludes(workflow, "name: image");
   } finally {

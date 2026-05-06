@@ -2,7 +2,7 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import { stringify as stringifyYaml } from "@std/yaml";
 import { join } from "@std/path";
 import type { StepExecutor } from "@takos/takosumi-git-workflow-runner";
-import { push } from "./push.ts";
+import { parsePushArgs, push } from "./push.ts";
 
 interface Project {
   readonly root: string;
@@ -37,7 +37,14 @@ async function makeProject(opts: {
 
 const fakeOk: StepExecutor = (_run, _ctx) =>
   Promise.resolve({
-    stdout: "ghcr.io/example/app@sha256:deadbeef\n",
+    stdout:
+      "build complete\nTAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:deadbeef\n",
+    exitCode: 0,
+  });
+
+const fakeLegacyOk: StepExecutor = (_run, _ctx) =>
+  Promise.resolve({
+    stdout: "build complete\nghcr.io/example/app@sha256:deadbeef\n",
     exitCode: 0,
   });
 
@@ -320,6 +327,128 @@ Deno.test("push leaves resource entries without workflowRef untouched", async ()
     // The static resource never had workflowRef; should be unchanged.
     assert(!("workflowRef" in staticEntry));
     assert(!("workflowRef" in apiEntry));
+  } finally {
+    await project.cleanup();
+  }
+});
+
+Deno.test("push defaults artifact contract to v1 marker detection", () => {
+  const parsed = parsePushArgs(["--dry-run"], {
+    get: () => undefined,
+  });
+  assertEquals(parsed.artifactContract, "v1");
+
+  const auto = parsePushArgs(["--dry-run", "--artifact-contract", "auto"], {
+    get: () => undefined,
+  });
+  assertEquals(auto.artifactContract, "auto");
+});
+
+Deno.test("push rejects v1 workflows that only emit legacy stdout artifacts", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "api",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "PLACEHOLDER", port: 8080 },
+          workflowRef: {
+            file: "build.yml",
+            job: "build",
+            artifact: "image",
+          },
+        },
+      ],
+    },
+    workflows: {
+      "build.yml": {
+        version: "0",
+        jobs: [
+          {
+            name: "build",
+            steps: [{ name: "s", run: "true" }],
+            artifact: { name: "image" },
+          },
+        ],
+      },
+    },
+  });
+
+  try {
+    await assertRejects(
+      () =>
+        push({
+          endpoint: "http://nope",
+          token: "x",
+          manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+          workflowsDir: join(project.root, ".takosumi", "workflows"),
+          mode: "apply",
+          dryRun: true,
+          executorFactory: () => fakeLegacyOk,
+          stdout: () => {},
+        }),
+      Error,
+      "produced no TAKOSUMI_ARTIFACT=<uri> marker",
+    );
+  } finally {
+    await project.cleanup();
+  }
+});
+
+Deno.test("push supports explicit v0 and auto fallback artifact contracts", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "api",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "PLACEHOLDER", port: 8080 },
+          workflowRef: {
+            file: "build.yml",
+            job: "build",
+            artifact: "image",
+          },
+        },
+      ],
+    },
+    workflows: {
+      "build.yml": {
+        version: "0",
+        jobs: [
+          {
+            name: "build",
+            steps: [{ name: "s", run: "true" }],
+            artifact: { name: "image" },
+          },
+        ],
+      },
+    },
+  });
+
+  try {
+    for (const artifactContract of ["v0", "auto"] as const) {
+      const result = await push({
+        endpoint: "http://nope",
+        token: "x",
+        manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+        workflowsDir: join(project.root, ".takosumi", "workflows"),
+        mode: "apply",
+        dryRun: true,
+        artifactContract,
+        executorFactory: () => fakeLegacyOk,
+        stdout: () => {},
+      });
+      assertEquals(
+        result.resolved[0].artifact.uri,
+        "ghcr.io/example/app@sha256:deadbeef",
+      );
+    }
   } finally {
     await project.cleanup();
   }

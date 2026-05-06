@@ -38,6 +38,8 @@ PUSH OPTIONS:
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
   --mode <apply|plan|destroy>  deploy mode (default apply)
+  --artifact-contract <v0|v1|auto>
+                               artifact URI resolver (default v1)
   --dry-run                    run workflows but skip POST; print resolved manifest
 
 GLOBAL OPTIONS:
