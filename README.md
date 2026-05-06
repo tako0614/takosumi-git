@@ -19,5 +19,10 @@ live on this side of the `POST /v1/deployments` boundary.
 
 ## Status
 
-Skeleton — package stubs only. See [AGENTS.md](./AGENTS.md) for the planned
-package layout and design boundaries.
+`takosumi-git push` is implemented: it parses `.takosumi/manifest.yml`, resolves
+each `compute.<name>.workflowRef` by running the referenced workflow job's steps
+(via `bash -lc`), substitutes the resolved artifact URI into the corresponding
+`image` field, strips the private `workflowRef` extension, and posts the cleaned
+manifest to a takosumi kernel via `POST /v1/deployments`. `serve` (webhook
+receiver) and `history` (manifest version listing) remain stubs. See
+[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
