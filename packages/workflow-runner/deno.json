@@ -1,6 +1,7 @@
 {
   "name": "@takos/takosumi-git-workflow-runner",
   "version": "0.0.1",
+  "license": "MIT",
   "exports": "./src/mod.ts",
   "imports": {
     "@takos/takosumi-git-workflow-contract": "../workflow-contract/src/mod.ts"

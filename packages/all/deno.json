@@ -1,6 +1,7 @@
 {
   "name": "@takos/takosumi-git",
   "version": "0.0.1",
+  "license": "MIT",
   "exports": "./src/mod.ts",
   "imports": {
     "@takos/takosumi-git-deploy-client": "../deploy-client/src/mod.ts",
