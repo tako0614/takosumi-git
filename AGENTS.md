@@ -128,7 +128,8 @@ takosumi-git history                  # git history = manifest version 履歴を
 `ManifestResource` は closed shape)。解決後の URI は同 entry の `spec.image`
 に書き込まれる。artifact URI 自体は v0 contract として **last successful step
 の最後の非空 stdout 行** を採用する (workflow 側で
-`echo "ghcr.io/foo/bar@sha256:..."` を最終行に出力する想定)。
+`echo "ghcr.io/foo/bar@sha256:..."` を最終行に出力する想定)。詳細は
+[`docs/artifact-contract.md`](./docs/artifact-contract.md) を参照。
 
 ## Lint / Format / Test 共通設定
 

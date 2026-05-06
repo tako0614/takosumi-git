@@ -15,6 +15,9 @@ the package version of `@takos/takosumi-git-cli`.
   into `resources[i].spec.image`. This matches what `takosumi-git init` already
   scaffolds and what the takosumi kernel accepts on `POST /v1/deployments`.
 - All `push` tests rewritten against the v1 envelope.
+- Added `docs/artifact-contract.md` to make the v0 artifact URI contract
+  explicit: `push` resolves the last non-empty stdout line from successful
+  workflow steps into `resources[i].spec.image` before stripping `workflowRef`.
 
 ## 0.2.0
 
