@@ -39,12 +39,14 @@ parses `.takosumi/manifest.yml` (a takosumi v1 manifest envelope), resolves each
 `bash -lc`) and reading the v1 `TAKOSUMI_ARTIFACT=<uri>` stdout marker,
 substitutes the resolved artifact URI into that resource entry's `spec.image`
 field, strips the private `workflowRef` extension, and posts the cleaned
-manifest to a takosumi kernel via `POST /v1/deployments`. `serve` (webhook
-receiver) and `history` (manifest version listing) remain stubs. See
-[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
+manifest to a takosumi kernel via `POST /v1/deployments`. `history` lists
+manifest commits and renders per-resource semantic diffs. `serve` (webhook
+receiver) remains a stub. See [AGENTS.md](./AGENTS.md) for package layout and
+design boundaries.
 
 ## Docs
 
 - [Quickstart](./docs/quickstart.md)
 - [WorkflowRef](./docs/workflow-ref.md)
 - [Artifact URI Contract](./docs/artifact-contract.md)
+- [History](./docs/history.md)

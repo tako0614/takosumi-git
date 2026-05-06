@@ -4,11 +4,13 @@
  * CLI entrypoint for `takosumi-git`. The `push` subcommand is wired to a
  * real implementation that resolves `.takosumi/manifest.yml` plus the
  * referenced workflows and submits the cleaned manifest to the takosumi
- * kernel via `POST /v1/deployments`. `serve` and `history` remain stubs.
+ * kernel via `POST /v1/deployments`. `history` reads manifest git history.
+ * `serve` remains a stub.
  */
 
 import { runPushCli } from "./push.ts";
 import { runInitCli } from "./init.ts";
+import { runHistoryCli } from "./history.ts";
 
 const VERSION = "0.3.0";
 
@@ -23,7 +25,7 @@ COMMANDS:
   init        Scaffold .takosumi/manifest.yml and workflows in this repo
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
   serve       Run a webhook receiver that auto-pushes on git events (stub)
-  history     Show manifest version history (stub)
+  history     Show manifest version history
   help        Show this help
   version     Print version
 
@@ -41,6 +43,12 @@ PUSH OPTIONS:
   --artifact-contract <v0|v1|auto>
                                artifact URI resolver (default v1)
   --dry-run                    run workflows but skip POST; print resolved manifest
+
+HISTORY OPTIONS:
+  --cwd <dir>                  git repository root (default .)
+  --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
+  --resource <name>            show semantic YAML diff for one resources[].name
+  --limit <n>                  maximum manifest commits to read (default 20)
 
 GLOBAL OPTIONS:
   -h, --help     Show help
@@ -66,7 +74,10 @@ export async function run(args: readonly string[]): Promise<number> {
   if (first === "push") {
     return await runPushCli(rest);
   }
-  if (first === "serve" || first === "history") {
+  if (first === "history") {
+    return await runHistoryCli(rest);
+  }
+  if (first === "serve") {
     Deno.stderr.writeSync(new TextEncoder().encode(NOT_IMPLEMENTED(first)));
     return 64;
   }

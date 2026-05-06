@@ -25,8 +25,8 @@ takosumi-git/
 envelope を `.takosumi/manifest.yml` から読み、`resources[i].workflowRef`
 で参照される workflow を実行し、artifact URI を該当 entry の `spec.image` field
 に embed して `workflowRef` を strip した上で takosumi の `POST /v1/deployments`
-に投下する)。`serve` (webhook receiver) と `history` (manifest version 履歴表示)
-は follow-up commit で実装する stub のまま。
+に投下する)。`history` は manifest git history と resource semantic diff を表示
+する。`serve` (webhook receiver) は follow-up commit で実装する stub のまま。
 
 ## 基本方針
 
@@ -49,14 +49,14 @@ envelope を `.takosumi/manifest.yml` から読み、`resources[i].workflowRef`
 
 ## JSR publish layout (planned)
 
-| Package                                 | Version | 内容                                                                    |
-| --------------------------------------- | ------- | ----------------------------------------------------------------------- |
-| `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                             |
-| `@takos/takosumi-git-cli`               | 0.3.0   | CLI (`takosumi-git init` / `push` 実装済 / `serve` / `history` は stub) |
-| `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)                |
-| `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)             |
-| `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization                        |
-| `@takos/takosumi-git`                   | 0.0.1   | umbrella (上記を re-export)                                             |
+| Package                                 | Version | 内容                                                                   |
+| --------------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                            |
+| `@takos/takosumi-git-cli`               | 0.3.0   | CLI (`takosumi-git init` / `push` / `history` 実装済、`serve` は stub) |
+| `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)               |
+| `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)            |
+| `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization                       |
+| `@takos/takosumi-git`                   | 0.0.1   | umbrella (上記を re-export)                                            |
 
 ## .takosumi/ project convention
 
@@ -101,7 +101,7 @@ convention now lives here exclusively.
 takosumi-git init [options]           # .takosumi/manifest.yml + workflows/build.yml を scaffold
 takosumi-git push [options]           # repo の .takosumi/manifest.yml + workflow を解決して takosumi に投下
 takosumi-git serve --webhook          # git webhook を受け、自動で push 実行 (stub)
-takosumi-git history                  # git history = manifest version 履歴を表示 (stub)
+takosumi-git history                  # git history = manifest version 履歴を表示
 ```
 
 `init` の主な flag:
@@ -144,8 +144,9 @@ stdout marker を採用する。v0 の最後の非空 stdout 行 contract は
 
 現時点では standalone docs site を持たず、`docs/*.md` を GitHub / JSR package
 同梱 Markdown として publish-ready に保つ。最低限の正本 docs は
-`docs/quickstart.md`、`docs/workflow-ref.md`、`docs/artifact-contract.md`。
-VitePress 等の docs site 化は JSR publish 後の follow-up とする。
+`docs/quickstart.md`、`docs/workflow-ref.md`、`docs/artifact-contract.md`、
+`docs/history.md`。 VitePress 等の docs site 化は JSR publish 後の follow-up
+とする。
 
 ## 依存関係
 

@@ -12,6 +12,8 @@ the package version of `@takos/takosumi-git-cli`.
   line resolver as an explicit legacy mode, and `auto` tries v1 before v0.
 - Updated `takosumi-git init`, README, quickstart, and artifact contract docs to
   generate and document v1 marker output.
+- Implemented `takosumi-git history` with manifest commit listing and
+  `--resource <name>` semantic YAML diff output.
 
 ## 0.3.0
 
