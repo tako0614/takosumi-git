@@ -37,7 +37,40 @@ Deno.test("artifact contract is linked from top-level docs", async () => {
   const agents = await read("AGENTS.md");
 
   assert.ok(readme.includes("docs/artifact-contract.md"));
+  assert.ok(readme.includes("docs/workflow-ref.md"));
+  assert.ok(readme.includes("docs/quickstart.md"));
   assert.ok(agents.includes("docs/artifact-contract.md"));
+  assert.ok(agents.includes("docs/workflow-ref.md"));
+  assert.ok(agents.includes("docs/quickstart.md"));
+});
+
+Deno.test("quickstart and workflow-ref docs pin the project convention", async () => {
+  const quickstart = await read("docs/quickstart.md");
+  const workflowRef = await read("docs/workflow-ref.md");
+
+  for (
+    const snippet of [
+      "takosumi-git init",
+      "takosumi-git/packages/cli/src/main.ts push --dry-run",
+      "POST /v1/deployments",
+      ".takosumi/manifest.yml",
+      "Artifact URI Contract",
+    ]
+  ) {
+    assert.ok(quickstart.includes(snippet), `quickstart missing ${snippet}`);
+  }
+
+  for (
+    const snippet of [
+      "resources[i].workflowRef",
+      "ComputeWorkflowRef",
+      "resources[i].spec.image",
+      "stripped before `POST /v1/deployments`",
+      "resources[i].workflowRef must have string {file, job, artifact}",
+    ]
+  ) {
+    assert.ok(workflowRef.includes(snippet), `workflowRef missing ${snippet}`);
+  }
 });
 
 async function read(path: string): Promise<string> {

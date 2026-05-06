@@ -18,6 +18,8 @@ the package version of `@takos/takosumi-git-cli`.
 - Added `docs/artifact-contract.md` to make the v0 artifact URI contract
   explicit: `push` resolves the last non-empty stdout line from successful
   workflow steps into `resources[i].spec.image` before stripping `workflowRef`.
+- Added `docs/quickstart.md` and `docs/workflow-ref.md`; README now links the
+  minimum publish-ready docs set.
 
 ## 0.2.0
 

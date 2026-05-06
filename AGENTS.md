@@ -139,6 +139,13 @@ takosumi-git history                  # git history = manifest version 履歴を
 - Test: `deno task test`
 - Type check: `deno task check`
 
+## Docs 方針
+
+現時点では standalone docs site を持たず、`docs/*.md` を GitHub / JSR package
+同梱 Markdown として publish-ready に保つ。最低限の正本 docs は
+`docs/quickstart.md`、`docs/workflow-ref.md`、`docs/artifact-contract.md`。
+VitePress 等の docs site 化は JSR publish 後の follow-up とする。
+
 ## 依存関係
 
 - **Upstream contract**: `@takos/takosumi-contract` (manifest envelope の型)

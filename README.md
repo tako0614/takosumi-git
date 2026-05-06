@@ -40,5 +40,10 @@ parses `.takosumi/manifest.yml` (a takosumi v1 manifest envelope), resolves each
 `spec.image` field, strips the private `workflowRef` extension, and posts the
 cleaned manifest to a takosumi kernel via `POST /v1/deployments`. `serve`
 (webhook receiver) and `history` (manifest version listing) remain stubs. See
-[AGENTS.md](./AGENTS.md) for package layout and design boundaries, and
-[Artifact URI Contract](./docs/artifact-contract.md) for the v0 stdout contract.
+[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
+
+## Docs
+
+- [Quickstart](./docs/quickstart.md)
+- [WorkflowRef](./docs/workflow-ref.md)
+- [Artifact URI Contract](./docs/artifact-contract.md)
