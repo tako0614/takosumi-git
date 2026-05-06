@@ -7,7 +7,7 @@
  *   └── .takosumi/
  *       ├── manifest.yml           (deploy intent, the only file submitted to takosumi)
  *       └── workflows/
- *           └── build.yml          (workflow referenced by compute.<name>.workflowRef)
+ *           └── build.yml          (workflow referenced by resources[i].workflowRef)
  *
  * The `.takosumi/` convention is owned by takosumi-git, NOT by the takosumi
  * kernel. The kernel takes manifests by explicit path or HTTP body and has

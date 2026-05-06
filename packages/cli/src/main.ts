@@ -10,7 +10,7 @@
 import { runPushCli } from "./push.ts";
 import { runInitCli } from "./init.ts";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
 
 const HELP_TEXT = `takosumi-git ${VERSION}
 

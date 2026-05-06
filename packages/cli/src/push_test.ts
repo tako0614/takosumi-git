@@ -41,22 +41,28 @@ const fakeOk: StepExecutor = (_run, _ctx) =>
     exitCode: 0,
   });
 
-Deno.test("push --dry-run resolves workflowRef into image and strips workflowRef", async () => {
+Deno.test("push --dry-run resolves workflowRef into spec.image and strips workflowRef", async () => {
   const project = await makeProject({
     manifest: {
       apiVersion: "1.0",
       kind: "Manifest",
       metadata: { name: "demo" },
-      compute: {
-        web: {
-          image: "PLACEHOLDER",
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "web",
+          provider: "@takos/cloudflare-container",
+          spec: {
+            image: "PLACEHOLDER",
+            port: 8080,
+          },
           workflowRef: {
             file: "build.yml",
             job: "build-image",
             artifact: "image",
           },
         },
-      },
+      ],
     },
     workflows: {
       "build.yml": {
@@ -95,14 +101,15 @@ Deno.test("push --dry-run resolves workflowRef into image and strips workflowRef
       }) as typeof fetch,
     });
 
-    const compute = result.manifest.compute as Record<
-      string,
+    const resources = result.manifest.resources as Array<
       Record<string, unknown>
     >;
-    assertEquals(compute.web.image, "ghcr.io/example/app@sha256:deadbeef");
-    assert(!("workflowRef" in compute.web), "workflowRef must be stripped");
+    const web = resources[0];
+    const spec = web.spec as Record<string, unknown>;
+    assertEquals(spec.image, "ghcr.io/example/app@sha256:deadbeef");
+    assert(!("workflowRef" in web), "workflowRef must be stripped");
     assertEquals(result.resolved.length, 1);
-    assertEquals(result.resolved[0].compute, "web");
+    assertEquals(result.resolved[0].resource, "web");
     assertEquals(
       result.resolved[0].artifact.uri,
       "ghcr.io/example/app@sha256:deadbeef",
@@ -119,16 +126,19 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
     manifest: {
       apiVersion: "1.0",
       kind: "Manifest",
-      compute: {
-        api: {
-          image: "old",
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "api",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "old", port: 8080 },
           workflowRef: {
             file: "build.yml",
             job: "build-image",
             artifact: "image",
           },
         },
-      },
+      ],
     },
     workflows: {
       "build.yml": {
@@ -172,15 +182,14 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
     assertEquals(postedAuth, "Bearer secret");
     const body = postedBody as {
       mode: string;
-      manifest: { compute: Record<string, Record<string, unknown>> };
+      manifest: { resources: Array<Record<string, unknown>> };
     };
     assertEquals(body.mode, "apply");
-    assertEquals(
-      body.manifest.compute.api.image,
-      "ghcr.io/example/app@sha256:deadbeef",
-    );
+    const api = body.manifest.resources[0];
+    const spec = api.spec as Record<string, unknown>;
+    assertEquals(spec.image, "ghcr.io/example/app@sha256:deadbeef");
     assert(
-      !("workflowRef" in body.manifest.compute.api),
+      !("workflowRef" in api),
       "workflowRef must be stripped from POST body",
     );
   } finally {
@@ -191,16 +200,21 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
 Deno.test("push surfaces non-zero step exit as error", async () => {
   const project = await makeProject({
     manifest: {
-      compute: {
-        web: {
-          image: "x",
+      apiVersion: "1.0",
+      kind: "Manifest",
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "web",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "x", port: 8080 },
           workflowRef: {
             file: "build.yml",
             job: "build",
             artifact: "image",
           },
         },
-      },
+      ],
     },
     workflows: {
       "build.yml": {
@@ -240,20 +254,30 @@ Deno.test("push surfaces non-zero step exit as error", async () => {
   }
 });
 
-Deno.test("push leaves compute entries without workflowRef untouched", async () => {
+Deno.test("push leaves resource entries without workflowRef untouched", async () => {
   const project = await makeProject({
     manifest: {
-      compute: {
-        static: { image: "ghcr.io/static@sha256:beef" },
-        api: {
-          image: "PLACEHOLDER",
+      apiVersion: "1.0",
+      kind: "Manifest",
+      resources: [
+        {
+          shape: "object-store@v1",
+          name: "static",
+          provider: "@takos/cloudflare-r2",
+          spec: { name: "static-assets" },
+        },
+        {
+          shape: "web-service@v1",
+          name: "api",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "PLACEHOLDER", port: 8080 },
           workflowRef: {
             file: "build.yml",
             job: "build",
             artifact: "image",
           },
         },
-      },
+      ],
     },
     workflows: {
       "build.yml": {
@@ -280,12 +304,22 @@ Deno.test("push leaves compute entries without workflowRef untouched", async () 
       executorFactory: () => fakeOk,
       stdout: () => {},
     });
-    const compute = result.manifest.compute as Record<
-      string,
+    const resources = result.manifest.resources as Array<
       Record<string, unknown>
     >;
-    assertEquals(compute.static.image, "ghcr.io/static@sha256:beef");
-    assertEquals(compute.api.image, "ghcr.io/example/app@sha256:deadbeef");
+    const staticEntry = resources[0];
+    const apiEntry = resources[1];
+    assertEquals(
+      (staticEntry.spec as Record<string, unknown>).name,
+      "static-assets",
+    );
+    assertEquals(
+      (apiEntry.spec as Record<string, unknown>).image,
+      "ghcr.io/example/app@sha256:deadbeef",
+    );
+    // The static resource never had workflowRef; should be unchanged.
+    assert(!("workflowRef" in staticEntry));
+    assert(!("workflowRef" in apiEntry));
   } finally {
     await project.cleanup();
   }

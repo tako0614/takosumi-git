@@ -2,11 +2,13 @@
  * `takosumi-git push` implementation.
  *
  * Flow:
- *   1. Read project root's `.takosumi/manifest.yml` (YAML).
- *   2. For each `compute.<name>` entry that carries a `workflowRef:
- *      { file, job, artifact }` field (a takosumi-git private extension
- *      that takosumi kernel does not understand), read the referenced
- *      workflow file under `.takosumi/workflows/`.
+ *   1. Read project root's `.takosumi/manifest.yml` (YAML), which is a
+ *      takosumi v1 manifest envelope (apiVersion / kind / metadata /
+ *      template / resources[]).
+ *   2. For each entry in `resources[]` that carries a `workflowRef:
+ *      { file, job, artifact }` field — a takosumi-git private extension
+ *      placed alongside `shape` / `spec` / etc. on the resource entry —
+ *      read the referenced workflow file under `.takosumi/workflows/`.
  *   3. Run the named job's steps as subprocesses (`bash -lc <run>`),
  *      capturing each step's stdout.
  *   4. Resolve the artifact URI: **the last successful step's last
@@ -14,11 +16,12 @@
  *      contract — explicit, simple, and easy to produce from any build
  *      script (`echo "ghcr.io/foo/bar@sha256:..."` as the final line).
  *   5. Substitute the resolved URI into the corresponding
- *      `compute.<name>.image` field. takosumi requires a digest-pinned
+ *      `resources[i].spec.image` field. takosumi requires a digest-pinned
  *      URI, but we do not enforce that here — it is the workflow's
  *      responsibility to print one.
- *   6. Strip every `workflowRef` field from the manifest so the kernel
- *      receives a clean document.
+ *   6. Strip every `workflowRef` field so the kernel receives a clean
+ *      manifest matching the closed v1 envelope (kernel rejects unknown
+ *      fields on resource entries).
  *   7. POST the cleaned manifest to takosumi via `postDeployment`,
  *      unless `--dry-run` was passed (in which case the resolved
  *      manifest is printed to stdout).
@@ -64,7 +67,7 @@ export interface PushOptions {
 export interface PushResult {
   readonly manifest: Record<string, unknown>;
   readonly resolved: ReadonlyArray<{
-    readonly compute: string;
+    readonly resource: string;
     readonly artifact: ResolvedArtifact;
   }>;
   readonly response?: { status: number; body: unknown };
@@ -129,7 +132,10 @@ export function lastLineArtifactResolver(
   };
 }
 
-interface ComputeEntry {
+interface ResourceEntry {
+  /** Index into the manifest.resources[] array. */
+  readonly index: number;
+  /** Resource's `name` field (or fallback synthesized from index). */
   readonly name: string;
   readonly workflowRef: ComputeWorkflowRef;
 }
@@ -138,13 +144,14 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === "object" && x !== null && !Array.isArray(x);
 }
 
-function extractComputeEntries(
+function extractResourceEntries(
   manifest: Record<string, unknown>,
-): ComputeEntry[] {
-  const compute = manifest.compute;
-  if (!isRecord(compute)) return [];
-  const entries: ComputeEntry[] = [];
-  for (const [name, raw] of Object.entries(compute)) {
+): ResourceEntry[] {
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return [];
+  const entries: ResourceEntry[] = [];
+  for (let i = 0; i < resources.length; i++) {
+    const raw = resources[i];
     if (!isRecord(raw)) continue;
     const ref = raw.workflowRef;
     if (!isRecord(ref)) continue;
@@ -154,10 +161,12 @@ function extractComputeEntries(
       typeof ref.artifact !== "string"
     ) {
       throw new Error(
-        `compute.${name}.workflowRef must have string {file, job, artifact}`,
+        `resources[${i}].workflowRef must have string {file, job, artifact}`,
       );
     }
+    const name = typeof raw.name === "string" ? raw.name : `resources[${i}]`;
     entries.push({
+      index: i,
       name,
       workflowRef: {
         file: ref.file,
@@ -170,25 +179,28 @@ function extractComputeEntries(
 }
 
 function stripWorkflowRefs(manifest: Record<string, unknown>): void {
-  const compute = manifest.compute;
-  if (!isRecord(compute)) return;
-  for (const value of Object.values(compute)) {
-    if (isRecord(value) && "workflowRef" in value) {
-      delete (value as Record<string, unknown>).workflowRef;
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return;
+  for (const entry of resources) {
+    if (isRecord(entry) && "workflowRef" in entry) {
+      delete (entry as Record<string, unknown>).workflowRef;
     }
   }
 }
 
-function setComputeImage(
+function setResourceImage(
   manifest: Record<string, unknown>,
-  computeName: string,
+  index: number,
   uri: string,
 ): void {
-  const compute = manifest.compute;
-  if (!isRecord(compute)) return;
-  const entry = compute[computeName];
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return;
+  const entry = resources[index];
   if (!isRecord(entry)) return;
-  entry.image = uri;
+  if (!isRecord(entry.spec)) {
+    entry.spec = {};
+  }
+  (entry.spec as Record<string, unknown>).image = uri;
 }
 
 async function readYaml<T>(path: string): Promise<T> {
@@ -214,12 +226,12 @@ export async function push(options: PushOptions): Promise<PushResult> {
   if (!isRecord(manifest)) {
     throw new Error(`manifest at ${manifestPath} is not an object`);
   }
-  const entries = extractComputeEntries(manifest);
+  const entries = extractResourceEntries(manifest);
   const projectRoot = dirname(dirname(manifestPath)); // parent of `.takosumi/`
   const executorFactory = options.executorFactory ??
     ((_dir: string) => defaultStepExecutor(projectRoot));
 
-  const resolved: { compute: string; artifact: ResolvedArtifact }[] = [];
+  const resolved: { resource: string; artifact: ResolvedArtifact }[] = [];
 
   for (const entry of entries) {
     const workflowPath = join(workflowsDir, entry.workflowRef.file);
@@ -263,25 +275,25 @@ export async function push(options: PushOptions): Promise<PushResult> {
     if (!result.success) {
       const detail = result.logs.join("\n");
       throw new Error(
-        `workflow job '${entry.workflowRef.job}' (compute '${entry.name}') failed:\n${detail}`,
+        `workflow job '${entry.workflowRef.job}' (resource '${entry.name}') failed:\n${detail}`,
       );
     }
     if (!result.artifact) {
       throw new Error(
-        `workflow job '${entry.workflowRef.job}' (compute '${entry.name}') produced no artifact; ` +
+        `workflow job '${entry.workflowRef.job}' (resource '${entry.name}') produced no artifact; ` +
           `add an 'artifact' field to the job spec so the runner resolves a URI`,
       );
     }
 
-    setComputeImage(manifest, entry.name, result.artifact.uri);
-    resolved.push({ compute: entry.name, artifact: result.artifact });
+    setResourceImage(manifest, entry.index, result.artifact.uri);
+    resolved.push({ resource: entry.name, artifact: result.artifact });
   }
 
   stripWorkflowRefs(manifest);
 
   if (options.dryRun) {
     stdout(
-      `# takosumi-git push --dry-run\n# resolved ${resolved.length} compute(s)\n`,
+      `# takosumi-git push --dry-run\n# resolved ${resolved.length} resource(s)\n`,
     );
     stdout(stringifyYaml(manifest));
     return { manifest, resolved };

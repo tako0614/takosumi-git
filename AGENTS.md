@@ -21,11 +21,12 @@ takosumi-git/
 └── README.md
 ```
 
-全 6 package が存在する。`takosumi-git push` は実装済 (manifest YAML を読み、
-`compute.<name>.workflowRef` で参照される workflow を実行し、artifact URI を
-`image` field に embed して `workflowRef` を strip した上で takosumi の
-`POST /v1/deployments` に投下する)。`serve` (webhook receiver) と `history`
-(manifest version 履歴表示) は follow-up commit で実装する stub のまま。
+全 6 package が存在する。`takosumi-git push` は実装済 (takosumi v1 manifest
+envelope を `.takosumi/manifest.yml` から読み、`resources[i].workflowRef`
+で参照される workflow を実行し、artifact URI を該当 entry の `spec.image` field
+に embed して `workflowRef` を strip した上で takosumi の `POST /v1/deployments`
+に投下する)。`serve` (webhook receiver) と `history` (manifest version 履歴表示)
+は follow-up commit で実装する stub のまま。
 
 ## 基本方針
 
@@ -51,7 +52,7 @@ takosumi-git/
 | Package                                 | Version | 内容                                                                    |
 | --------------------------------------- | ------- | ----------------------------------------------------------------------- |
 | `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                             |
-| `@takos/takosumi-git-cli`               | 0.2.0   | CLI (`takosumi-git init` / `push` 実装済 / `serve` / `history` は stub) |
+| `@takos/takosumi-git-cli`               | 0.3.0   | CLI (`takosumi-git init` / `push` 実装済 / `serve` / `history` は stub) |
 | `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)                |
 | `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)             |
 | `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization                        |
@@ -70,13 +71,16 @@ Project layout:
 <repo>/
 ├── .takosumi/
 │   ├── manifest.yml         ← deploy intent (the only file submitted to takosumi)
-│   └── workflows/           ← workflow YAML referenced by compute.<name>.workflowRef
+│   └── workflows/           ← workflow YAML referenced by resources[i].workflowRef
 │       └── *.yml
 ```
 
-`compute.<name>.workflowRef: { file, job, artifact }` は takosumi-git の private
-extension。takosumi-git が parse / resolve に使い、kernel に submit する前に必ず
-strip する (kernel は unknown field として reject するため)。
+`resources[i].workflowRef: { file, job, artifact }` は takosumi v1 manifest
+entry に sibling として置く takosumi-git の private extension。takosumi-git が
+parse / resolve に使い、kernel に submit する前に必ず strip する (kernel は
+closed shape の `ManifestResource` で unknown field を reject
+するため)。解決された artifact URI は 当該 entry の `spec.image` に substitute
+される。
 
 Quick start:
 
@@ -119,9 +123,11 @@ takosumi-git history                  # git history = manifest version 履歴を
 --dry-run                    workflow を実行するが POST はせず resolved manifest を出力
 ```
 
-`compute.<name>.workflowRef: { file, job, artifact }` は takosumi-git の私的
-拡張で、kernel に submit する前に必ず strip される。artifact URI は v0 contract
-として **last successful step の最後の非空 stdout 行** を採用する (workflow 側で
+`resources[i].workflowRef: { file, job, artifact }` は takosumi-git
+の私的拡張で、 kernel に submit する前に必ず strip される (kernel の
+`ManifestResource` は closed shape)。解決後の URI は同 entry の `spec.image`
+に書き込まれる。artifact URI 自体は v0 contract として **last successful step
+の最後の非空 stdout 行** を採用する (workflow 側で
 `echo "ghcr.io/foo/bar@sha256:..."` を最終行に出力する想定)。
 
 ## Lint / Format / Test 共通設定

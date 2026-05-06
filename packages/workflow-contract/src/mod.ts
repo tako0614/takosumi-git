@@ -2,9 +2,11 @@
  * `@takos/takosumi-git-workflow-contract`
  *
  * Type contracts for workflow YAML files placed under `.takosumi/workflows/`
- * and the events that drive them. The shape mirrors what was previously
- * accepted by the takosumi kernel under `compute.<name>.build.fromWorkflow`,
- * lifted out of the kernel and into this product.
+ * and the events that drive them. The previous home of the workflow concept
+ * was the takosumi kernel itself (`compute.<name>.build.fromWorkflow`); it
+ * has been lifted out of the kernel into this product, and now attaches to
+ * the takosumi v1 manifest envelope as `resources[i].workflowRef` (a
+ * private takosumi-git extension that is stripped before submission).
  */
 
 export type WorkflowEventKind = "manual" | "git-push" | "schedule" | "webhook";
@@ -50,18 +52,25 @@ export interface ResolvedArtifact {
 }
 
 /**
- * Reference embedded in a manifest's `compute.<name>.workflowRef` field
- * to bind that compute entry to a workflow job + artifact. This is a
- * takosumi-git private extension to the manifest YAML — it is parsed by
- * `takosumi-git push`, used to drive workflow execution, and **stripped
- * before the manifest is submitted to the takosumi kernel** (which would
- * otherwise reject it as an unknown field).
+ * Reference embedded as `resources[i].workflowRef` on a takosumi v1
+ * manifest entry to bind that resource to a workflow job + artifact.
+ * This is a takosumi-git private extension to the manifest YAML — it is
+ * parsed by `takosumi-git push`, used to drive workflow execution, and
+ * **stripped before the manifest is submitted to the takosumi kernel**
+ * (which would otherwise reject it as an unknown field on the closed
+ * resource entry shape).
+ *
+ * The resolved artifact URI is substituted into `resources[i].spec.image`.
+ *
+ * The type is named `ComputeWorkflowRef` for historical reasons (compute
+ * = the runtime-bearing resource family); the structural placement is on
+ * any resource entry that needs an upstream-resolved image URI.
  */
 export interface ComputeWorkflowRef {
   /** Workflow file name relative to the workflows directory (e.g. `build.yml`). */
   readonly file: string;
   /** Job name within the workflow file. */
   readonly job: string;
-  /** Artifact name produced by the job; the resolved URI replaces `image`. */
+  /** Artifact name produced by the job; the resolved URI replaces `spec.image`. */
   readonly artifact: string;
 }

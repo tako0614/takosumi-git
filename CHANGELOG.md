@@ -3,6 +3,19 @@
 All notable changes to `takosumi-git` are recorded here. The CLI version follows
 the package version of `@takos/takosumi-git-cli`.
 
+## 0.3.0
+
+- Aligned `takosumi-git push` with the takosumi v1 manifest envelope. The
+  manifest is now read as
+  `apiVersion / kind / metadata / template /
+  resources[]`; the private
+  `workflowRef` extension lives at `resources[i].workflowRef` (sibling of
+  `shape` / `spec` / `name` / etc.) rather than the legacy
+  `compute.<name>.workflowRef` form. The resolved artifact URI is substituted
+  into `resources[i].spec.image`. This matches what `takosumi-git init` already
+  scaffolds and what the takosumi kernel accepts on `POST /v1/deployments`.
+- All `push` tests rewritten against the v1 envelope.
+
 ## 0.2.0
 
 - Added `takosumi-git init` for scaffolding the `.takosumi/` project layout
@@ -17,7 +30,6 @@ the package version of `@takos/takosumi-git-cli`.
 
 - Initial `takosumi-git push` implementation: parse `.takosumi/manifest.yml`,
   execute the referenced workflow jobs via `bash -lc`, capture the last
-  non-empty stdout line as the artifact URI, substitute it into the
-  corresponding `compute.<name>.image` field, strip the private `workflowRef`
-  extension, and POST the cleaned manifest to the takosumi kernel via
-  `POST /v1/deployments`.
+  non-empty stdout line as the artifact URI, substitute it into the resolved
+  resource entry's `image` field, strip the private `workflowRef` extension, and
+  POST the cleaned manifest to the takosumi kernel via `POST /v1/deployments`.

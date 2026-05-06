@@ -34,10 +34,10 @@ takes manifests by explicit path or HTTP body and has no opinion on file layout
 
 `takosumi-git init` and `takosumi-git push` are implemented. `init` scaffolds
 the `.takosumi/` project layout (`manifest.yml` + `workflows/build.yml`). `push`
-parses `.takosumi/manifest.yml`, resolves each `compute.<name>.workflowRef` by
-running the referenced workflow job's steps (via `bash -lc`), substitutes the
-resolved artifact URI into the corresponding `image` field, strips the private
-`workflowRef` extension, and posts the cleaned manifest to a takosumi kernel via
-`POST /v1/deployments`. `serve` (webhook receiver) and `history` (manifest
-version listing) remain stubs. See [AGENTS.md](./AGENTS.md) for package layout
-and design boundaries.
+parses `.takosumi/manifest.yml` (a takosumi v1 manifest envelope), resolves each
+`resources[i].workflowRef` by running the referenced workflow job's steps (via
+`bash -lc`), substitutes the resolved artifact URI into that resource entry's
+`spec.image` field, strips the private `workflowRef` extension, and posts the
+cleaned manifest to a takosumi kernel via `POST /v1/deployments`. `serve`
+(webhook receiver) and `history` (manifest version listing) remain stubs. See
+[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
