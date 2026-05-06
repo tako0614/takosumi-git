@@ -1,0 +1,12 @@
+{
+  "name": "@takos/takosumi-git-workflow-runner",
+  "version": "0.0.1",
+  "exports": "./src/mod.ts",
+  "imports": {
+    "@takos/takosumi-git-workflow-contract": "../workflow-contract/src/mod.ts"
+  },
+  "tasks": {
+    "check": "deno check src/mod.ts",
+    "test": "deno test --allow-all"
+  }
+}

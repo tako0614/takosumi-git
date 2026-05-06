@@ -1,0 +1,16 @@
+{
+  "name": "@takos/takosumi-git",
+  "version": "0.0.1",
+  "exports": "./src/mod.ts",
+  "imports": {
+    "@takos/takosumi-git-deploy-client": "../deploy-client/src/mod.ts",
+    "@takos/takosumi-git-workflow-contract": "../workflow-contract/src/mod.ts",
+    "@takos/takosumi-git-workflow-runner": "../workflow-runner/src/mod.ts",
+    "@takos/takosumi-git-source": "../git-source/src/mod.ts",
+    "@std/assert": "jsr:@std/assert@^1"
+  },
+  "tasks": {
+    "check": "deno check src/mod.ts",
+    "test": "deno test --allow-all"
+  }
+}

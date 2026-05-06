@@ -1,10 +1,14 @@
 {
   "workspace": [
+    "./packages/workflow-contract",
+    "./packages/workflow-runner",
+    "./packages/git-source",
     "./packages/deploy-client",
-    "./packages/cli"
+    "./packages/cli",
+    "./packages/all"
   ],
   "tasks": {
-    "check": "deno check packages/deploy-client/src/mod.ts packages/cli/src/main.ts",
+    "check": "deno check packages/workflow-contract/src/mod.ts packages/workflow-runner/src/mod.ts packages/git-source/src/mod.ts packages/deploy-client/src/mod.ts packages/cli/src/main.ts packages/all/src/mod.ts",
     "test": "deno test --allow-all",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
