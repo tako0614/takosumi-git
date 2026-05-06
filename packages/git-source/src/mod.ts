@@ -2,9 +2,9 @@
  * `@takos/takosumi-git-source`
  *
  * Translates incoming git push / webhook payloads into normalized
- * `WorkflowEvent` records that the workflow runner consumes. Phase 2
- * skeleton: only structural normalization is provided. Webhook signature
- * verification, transport, and persistence are reserved for a follow-up.
+ * `WorkflowEvent` records that the workflow runner consumes. Transport,
+ * signature verification, queueing, and dispatch live in the takosumi-git CLI
+ * `serve` command so this package stays transport-neutral.
  */
 
 import type { WorkflowEvent } from "@takos/takosumi-git-workflow-contract";

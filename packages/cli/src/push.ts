@@ -56,6 +56,7 @@ export interface PushOptions {
   readonly mode: DeployMode;
   readonly dryRun: boolean;
   readonly artifactContract?: ArtifactContract;
+  readonly event?: WorkflowEvent;
   /** Injected for tests. Defaults to global `fetch`. */
   readonly fetch?: typeof fetch;
   /** Injected for tests. Defaults to a real `Deno.Command`-backed executor. */
@@ -333,7 +334,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
       return outcome;
     };
 
-    const event: WorkflowEvent = {
+    const event: WorkflowEvent = options.event ?? {
       kind: "manual",
       source: `takosumi-git push ${entry.name}`,
     };

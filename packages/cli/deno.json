@@ -4,6 +4,7 @@
   "exports": "./src/main.ts",
   "imports": {
     "@takos/takosumi-git-deploy-client": "../deploy-client/src/mod.ts",
+    "@takos/takosumi-git-source": "../git-source/src/mod.ts",
     "@takos/takosumi-git-workflow-contract": "../workflow-contract/src/mod.ts",
     "@takos/takosumi-git-workflow-runner": "../workflow-runner/src/mod.ts",
     "@std/yaml": "jsr:@std/yaml@^1",

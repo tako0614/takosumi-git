@@ -5,12 +5,13 @@
  * real implementation that resolves `.takosumi/manifest.yml` plus the
  * referenced workflows and submits the cleaned manifest to the takosumi
  * kernel via `POST /v1/deployments`. `history` reads manifest git history.
- * `serve` remains a stub.
+ * `serve` receives git webhooks and dispatches push.
  */
 
 import { runPushCli } from "./push.ts";
 import { runInitCli } from "./init.ts";
 import { runHistoryCli } from "./history.ts";
+import { runServeCli } from "./serve.ts";
 
 const VERSION = "0.3.0";
 
@@ -24,7 +25,7 @@ USAGE:
 COMMANDS:
   init        Scaffold .takosumi/manifest.yml and workflows in this repo
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
-  serve       Run a webhook receiver that auto-pushes on git events (stub)
+  serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
   help        Show this help
   version     Print version
@@ -50,13 +51,23 @@ HISTORY OPTIONS:
   --resource <name>            show semantic YAML diff for one resources[].name
   --limit <n>                  maximum manifest commits to read (default 20)
 
+SERVE OPTIONS:
+  --host <host>                listen host (default 0.0.0.0)
+  --port <port>                listen port (default 8788)
+  --endpoint <url>             takosumi kernel endpoint (or TAKOSUMI_ENDPOINT)
+  --token <token>              bearer token (or TAKOSUMI_TOKEN)
+  --webhook-secret <secret>    HMAC secret (or TAKOSUMI_GIT_WEBHOOK_SECRET)
+  --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
+  --workflows-dir <path>       workflows dir (default .takosumi/workflows)
+  --artifact-contract <v0|v1|auto>
+                               artifact URI resolver for dispatched push
+  --rate-limit <n>             max requests per rate window (default 60)
+  --rate-limit-window-ms <n>   rate window milliseconds (default 60000)
+
 GLOBAL OPTIONS:
   -h, --help     Show help
   -v, --version  Print version
 `;
-
-const NOT_IMPLEMENTED = (cmd: string) =>
-  `takosumi-git ${cmd}: not yet implemented\n`;
 
 export async function run(args: readonly string[]): Promise<number> {
   const [first, ...rest] = args;
@@ -78,8 +89,7 @@ export async function run(args: readonly string[]): Promise<number> {
     return await runHistoryCli(rest);
   }
   if (first === "serve") {
-    Deno.stderr.writeSync(new TextEncoder().encode(NOT_IMPLEMENTED(first)));
-    return 64;
+    return await runServeCli(rest);
   }
   Deno.stderr.writeSync(
     new TextEncoder().encode(`takosumi-git: unknown command '${first}'\n`),

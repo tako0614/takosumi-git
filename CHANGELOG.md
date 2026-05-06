@@ -14,6 +14,9 @@ the package version of `@takos/takosumi-git-cli`.
   generate and document v1 marker output.
 - Implemented `takosumi-git history` with manifest commit listing and
   `--resource <name>` semantic YAML diff output.
+- Implemented `takosumi-git serve` with GitHub / GitLab / Gitea webhook routes,
+  HMAC-SHA256 verification, in-memory rate limiting, delivery dedup, queue
+  draining, and webhook-triggered push dispatch.
 
 ## 0.3.0
 

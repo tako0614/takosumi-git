@@ -50,3 +50,4 @@ design boundaries.
 - [WorkflowRef](./docs/workflow-ref.md)
 - [Artifact URI Contract](./docs/artifact-contract.md)
 - [History](./docs/history.md)
+- [Serve](./docs/serve.md)
