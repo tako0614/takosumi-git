@@ -1,12 +1,15 @@
 /**
  * `@takos/takosumi-git-cli`
  *
- * CLI entrypoint for `takosumi-git`. Phase 2 skeleton — only `--help`
- * and `--version` are wired. `push` / `serve` / `history` subcommands
- * print a "not yet implemented" notice.
+ * CLI entrypoint for `takosumi-git`. The `push` subcommand is wired to a
+ * real implementation that resolves `.takosumi/manifest.yml` plus the
+ * referenced workflows and submits the cleaned manifest to the takosumi
+ * kernel via `POST /v1/deployments`. `serve` and `history` remain stubs.
  */
 
-const VERSION = "0.0.1";
+import { runPushCli } from "./push.ts";
+
+const VERSION = "0.1.0";
 
 const HELP_TEXT = `takosumi-git ${VERSION}
 
@@ -17,22 +20,28 @@ USAGE:
 
 COMMANDS:
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
-  serve       Run a webhook receiver that auto-pushes on git events
-  history     Show manifest version history (git history of manifest file)
+  serve       Run a webhook receiver that auto-pushes on git events (stub)
+  history     Show manifest version history (stub)
   help        Show this help
   version     Print version
+
+PUSH OPTIONS:
+  --endpoint <url>             takosumi kernel endpoint (or TAKOSUMI_ENDPOINT)
+  --token <token>              bearer token (or TAKOSUMI_TOKEN)
+  --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
+  --workflows-dir <path>       workflows dir (default .takosumi/workflows)
+  --mode <apply|plan|destroy>  deploy mode (default apply)
+  --dry-run                    run workflows but skip POST; print resolved manifest
 
 GLOBAL OPTIONS:
   -h, --help     Show help
   -v, --version  Print version
-
-Phase 2 skeleton: subcommands are stubbed.
 `;
 
 const NOT_IMPLEMENTED = (cmd: string) =>
-  `takosumi-git ${cmd}: not yet implemented (Phase 2 skeleton)\n`;
+  `takosumi-git ${cmd}: not yet implemented\n`;
 
-export function run(args: readonly string[]): number {
+export async function run(args: readonly string[]): Promise<number> {
   const [first, ...rest] = args;
   if (!first || first === "help" || first === "-h" || first === "--help") {
     Deno.stdout.writeSync(new TextEncoder().encode(HELP_TEXT));
@@ -42,7 +51,10 @@ export function run(args: readonly string[]): number {
     Deno.stdout.writeSync(new TextEncoder().encode(`${VERSION}\n`));
     return 0;
   }
-  if (first === "push" || first === "serve" || first === "history") {
+  if (first === "push") {
+    return await runPushCli(rest);
+  }
+  if (first === "serve" || first === "history") {
     Deno.stderr.writeSync(new TextEncoder().encode(NOT_IMPLEMENTED(first)));
     return 64;
   }
@@ -58,5 +70,5 @@ export function run(args: readonly string[]): number {
 }
 
 if (import.meta.main) {
-  Deno.exit(run(Deno.args));
+  Deno.exit(await run(Deno.args));
 }
