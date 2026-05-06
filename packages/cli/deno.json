@@ -1,0 +1,9 @@
+{
+  "name": "@takos/takosumi-git-cli",
+  "version": "0.0.1",
+  "exports": "./src/main.ts",
+  "tasks": {
+    "check": "deno check src/main.ts",
+    "test": "deno test --allow-all"
+  }
+}

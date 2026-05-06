@@ -1,0 +1,23 @@
+{
+  "workspace": [
+    "./packages/deploy-client",
+    "./packages/cli"
+  ],
+  "tasks": {
+    "check": "deno check packages/deploy-client/src/mod.ts packages/cli/src/main.ts",
+    "test": "deno test --allow-all",
+    "fmt": "deno fmt",
+    "fmt:check": "deno fmt --check",
+    "lint": "deno lint"
+  },
+  "fmt": {
+    "exclude": [
+      "node_modules"
+    ]
+  },
+  "lint": {
+    "exclude": [
+      "node_modules"
+    ]
+  }
+}
