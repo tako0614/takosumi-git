@@ -20,6 +20,9 @@ the package version of `@takos/takosumi-git-cli`.
   workflow steps into `resources[i].spec.image` before stripping `workflowRef`.
 - Added `docs/quickstart.md` and `docs/workflow-ref.md`; README now links the
   minimum publish-ready docs set.
+- `@takos/takosumi-git-deploy-client` now sends `X-Idempotency-Key` and retries
+  transient network / HTTP failures with bounded exponential backoff, reusing
+  the same idempotency key across attempts.
 
 ## 0.2.0
 

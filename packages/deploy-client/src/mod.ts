@@ -39,12 +39,34 @@ export interface DeployClientOptions {
   readonly endpoint: string;
   readonly token: string;
   readonly fetch?: typeof fetch;
+  readonly idempotencyKey?: string;
+  readonly retry?: false | DeployRetryOptions;
+}
+
+export interface DeployRetryOptions {
+  readonly attempts?: number;
+  readonly baseDelayMs?: number;
+  readonly maxDelayMs?: number;
+  readonly retryStatuses?: readonly number[];
+  readonly sleep?: (delayMs: number) => Promise<void>;
 }
 
 export interface DeployResponse {
   readonly status: number;
   readonly body: unknown;
+  readonly attempts: number;
+  readonly idempotencyKey: string;
 }
+
+const DEFAULT_RETRY_STATUSES = Object.freeze([
+  408,
+  425,
+  429,
+  500,
+  502,
+  503,
+  504,
+]);
 
 export async function postDeployment(
   options: DeployClientOptions,
@@ -52,14 +74,85 @@ export async function postDeployment(
 ): Promise<DeployResponse> {
   const fetchImpl = options.fetch ?? fetch;
   const url = new URL("/v1/deployments", options.endpoint).toString();
-  const response = await fetchImpl(url, {
+  const idempotencyKey = options.idempotencyKey ?? newIdempotencyKey();
+  const retry = normalizeRetry(options.retry);
+  const requestInit: RequestInit = {
     method: "POST",
     headers: {
       "content-type": "application/json",
       "authorization": `Bearer ${options.token}`,
+      "x-idempotency-key": idempotencyKey,
     },
     body: JSON.stringify(request),
-  });
-  const body = await response.json().catch(() => null);
-  return { status: response.status, body };
+  };
+
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= retry.attempts; attempt++) {
+    try {
+      const response = await fetchImpl(url, requestInit);
+      const body = await response.json().catch(() => null);
+      if (
+        attempt < retry.attempts &&
+        retry.retryStatuses.has(response.status)
+      ) {
+        await retry.sleep(backoffDelay(attempt, retry));
+        continue;
+      }
+      return {
+        status: response.status,
+        body,
+        attempts: attempt,
+        idempotencyKey,
+      };
+    } catch (error) {
+      lastError = error;
+      if (attempt >= retry.attempts) break;
+      await retry.sleep(backoffDelay(attempt, retry));
+    }
+  }
+  throw lastError;
+}
+
+interface NormalizedRetry {
+  readonly attempts: number;
+  readonly baseDelayMs: number;
+  readonly maxDelayMs: number;
+  readonly retryStatuses: ReadonlySet<number>;
+  readonly sleep: (delayMs: number) => Promise<void>;
+}
+
+function normalizeRetry(
+  options: false | DeployRetryOptions | undefined,
+): NormalizedRetry {
+  if (options === false) {
+    return {
+      attempts: 1,
+      baseDelayMs: 0,
+      maxDelayMs: 0,
+      retryStatuses: new Set(),
+      sleep: async () => {},
+    };
+  }
+  return {
+    attempts: Math.max(1, Math.floor(options?.attempts ?? 3)),
+    baseDelayMs: Math.max(0, options?.baseDelayMs ?? 250),
+    maxDelayMs: Math.max(0, options?.maxDelayMs ?? 2_000),
+    retryStatuses: new Set(options?.retryStatuses ?? DEFAULT_RETRY_STATUSES),
+    sleep: options?.sleep ?? defaultSleep,
+  };
+}
+
+function backoffDelay(attempt: number, retry: NormalizedRetry): number {
+  return Math.min(
+    retry.maxDelayMs,
+    retry.baseDelayMs * 2 ** Math.max(0, attempt - 1),
+  );
+}
+
+function defaultSleep(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
+
+function newIdempotencyKey(): string {
+  return `takosumi-git-${crypto.randomUUID()}`;
 }
