@@ -42,6 +42,9 @@ bindings:
     required: true
     redirectPaths:
       - /auth/oidc/callback
+    allowedScopes:
+      - openid
+      - profile
   database:
     type: database.postgres@v1
     required: true
@@ -363,6 +366,7 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
         TAKOS_SPACE_ID: "space_1",
         TAKOSUMI_SUBJECT: "tsub_owner",
         TAKOS_TOKEN: "secret",
+        TAKOSUMI_RUNTIME_BASE_URL: "https://hello.example",
       };
       return env[key];
     },
@@ -376,6 +380,7 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.token, "secret");
   assertEquals(parsed.mode, "dedicated");
   assertEquals(parsed.sourceCommit, "abcdefabcdefabcdefabcdefabcdefabcdefabcd");
+  assertEquals(parsed.runtimeBaseUrl, "https://hello.example");
 });
 
 Deno.test("applyInstall posts AppInstallation create request", async () => {
@@ -441,6 +446,7 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
     );
     assertEquals(body.bindings[0].secretRefs, []);
     assertEquals(body.serviceImports, []);
+    assertEquals(body.oidcClients, undefined);
     assertEquals(body.grants.length, 2);
   } finally {
     await Deno.remove(root, { recursive: true });
@@ -473,6 +479,7 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      runtimeBaseUrl: "http://localhost:8787",
       fetch: (input, init) => {
         requests.push(new Request(input, init));
         return Promise.resolve(Response.json({
@@ -499,6 +506,13 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       ),
       true,
     );
+    assertEquals(body.oidcClients, [{
+      binding: "auth",
+      serviceId: "takosumi.account.auth@v1",
+      redirectUris: ["http://localhost:8787/auth/oidc/callback"],
+      allowedScopes: ["openid", "profile"],
+      subjectMode: "pairwise",
+    }]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

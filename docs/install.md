@@ -61,6 +61,7 @@ takosumi-git install apply \
   --space-id space_... \
   --subject tsub_... \
   --source-commit 0123456789abcdef0123456789abcdef01234567 \
+  --runtime-base-url https://app.example.com \
   --mode shared-cell
 ```
 
@@ -74,7 +75,11 @@ The request carries the AppInstallation source pin, `appManifestDigest`,
 `compiledManifestDigest` when `.takosumi/manifest.yml` is present, AppBinding
 records derived from `app.yml` binding declarations, service import requests
 derived from `service.import@v1`, and AppGrant records derived from
-`permissions.requested`.
+`permissions.requested`. When `--runtime-base-url` (or
+`TAKOSUMI_RUNTIME_BASE_URL`) is supplied, `identity.oidc@v1` redirect paths are
+materialized into absolute redirect URIs and sent as an `oidcClients[]` request
+so Takosumi Accounts can create the per-installation OIDC client in the same
+ledger transaction.
 
 AppBinding records created at this step intentionally carry pending `configRef`
 values:

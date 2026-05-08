@@ -62,6 +62,7 @@ INSTALL OPTIONS:
   --subject <tsub_...>         installer subject for apply
   --mode <mode>                shared-cell | dedicated | self-hosted
   --source-commit <sha>        resolved 40-char source commit pin
+  --runtime-base-url <url>     app runtime base URL for OIDC redirects
   --json                       print preview JSON
 
 HISTORY OPTIONS:

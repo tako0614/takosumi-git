@@ -175,6 +175,18 @@ export interface InstallServiceImportPreview {
   readonly refreshPolicy?: Record<string, unknown>;
 }
 
+export interface InstallOidcClientCreateRequest {
+  readonly binding: string;
+  readonly serviceId: string;
+  readonly redirectUris: readonly string[];
+  readonly allowedScopes: readonly string[];
+  readonly subjectMode: "pairwise";
+  readonly tokenEndpointAuthMethod?:
+    | "client_secret_basic"
+    | "client_secret_post"
+    | "none";
+}
+
 export interface KernelManifestServiceImport {
   readonly alias: string;
   readonly service: string;
@@ -593,7 +605,15 @@ function parseBindingSpecificFields(
       `bindings.${name}.allowedScopes`,
       issues,
     );
-    if (scopes) binding.allowedScopes = scopes;
+    if (scopes) {
+      if (!scopes.includes("openid")) {
+        issues.push({
+          path: `bindings.${name}.allowedScopes`,
+          message: "must include openid",
+        });
+      }
+      binding.allowedScopes = scopes;
+    }
   } else if (type === "database.postgres@v1") {
     if (!postgresPlans.has(String(raw.plan))) {
       issues.push({
@@ -1388,6 +1408,7 @@ export interface ParsedInstallArgs {
   readonly createdBySubject?: string;
   readonly mode?: InstallableAppRuntimeMode;
   readonly sourceCommit?: string;
+  readonly runtimeBaseUrl?: string;
 }
 
 export function parseInstallArgs(
@@ -1417,6 +1438,7 @@ export function parseInstallArgs(
       "subject",
       "mode",
       "source-commit",
+      "runtime-base-url",
     ],
     boolean: ["json"],
     default: {
@@ -1442,6 +1464,10 @@ export function parseInstallArgs(
     env.get("TAKOSUMI_SUBJECT") ?? env.get("TAKOS_SUBJECT");
   const sourceCommit = (flags["source-commit"] as string | undefined) ??
     env.get("TAKOSUMI_SOURCE_COMMIT");
+  const runtimeBaseUrl = parseRuntimeBaseUrl(
+    (flags["runtime-base-url"] as string | undefined) ??
+      env.get("TAKOSUMI_RUNTIME_BASE_URL"),
+  );
   if (sourceCommit && !fullCommitPattern.test(sourceCommit)) {
     throw new Error("--source-commit must be a 40-char SHA");
   }
@@ -1474,6 +1500,7 @@ export function parseInstallArgs(
     ...(createdBySubject ? { createdBySubject } : {}),
     ...(mode ? { mode } : {}),
     ...(sourceCommit ? { sourceCommit } : {}),
+    ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
   };
 }
 
@@ -1487,6 +1514,28 @@ function parseRuntimeMode(value: unknown): InstallableAppRuntimeMode {
   throw new Error(
     `--mode must be one of ${INSTALLABLE_APP_RUNTIME_MODES.join("|")}`,
   );
+}
+
+function parseRuntimeBaseUrl(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" &&
+      !(url.protocol === "http:" &&
+        (url.hostname === "localhost" || url.hostname === "127.0.0.1"))
+    ) {
+      throw new Error("unsupported protocol");
+    }
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    throw new Error(
+      "--runtime-base-url must be an https URL or localhost http URL",
+    );
+  }
 }
 
 export class InstallHelpRequested extends Error {
@@ -1516,6 +1565,8 @@ APPLY OPTIONS:
   --subject <tsub_...>  installer subject (or TAKOSUMI_SUBJECT/TAKOS_SUBJECT)
   --mode <mode>         shared-cell | dedicated | self-hosted
   --source-commit <sha> resolved 40-char source commit pin
+  --runtime-base-url <url>
+                        app runtime base URL for OIDC redirect materialization
 `;
 
 interface InstallContext {
@@ -1581,6 +1632,59 @@ function appBindingCreateRequests(
   })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
 
+function installOidcClientCreateRequests(
+  app: InstallableApp,
+  runtimeBaseUrl: string | undefined,
+): InstallOidcClientCreateRequest[] {
+  if (!runtimeBaseUrl) return [];
+  const serviceId = firstAuthServiceImport(app)?.service ??
+    "takosumi.account.auth@v1";
+  return Object.entries(app.bindings)
+    .filter(([, binding]) => binding.type === "identity.oidc@v1")
+    .map(([name, binding]) => {
+      const redirectPaths = binding.redirectPaths ?? [];
+      const tokenEndpointAuthMethod = oidcClientAuthMethodForAccounts(
+        binding.tokenEndpointAuthMethod,
+      );
+      return {
+        binding: name,
+        serviceId,
+        redirectUris: redirectPaths.map((path) =>
+          absoluteUrl(runtimeBaseUrl, path)
+        ),
+        allowedScopes: binding.allowedScopes ?? ["openid"],
+        subjectMode: "pairwise" as const,
+        ...(tokenEndpointAuthMethod ? { tokenEndpointAuthMethod } : {}),
+      };
+    })
+    .sort((a, b) => a.binding.localeCompare(b.binding));
+}
+
+function firstAuthServiceImport(
+  app: InstallableApp,
+): InstallServiceImportPreview | undefined {
+  return buildInstallServiceImportPreview(app).find((serviceImport) =>
+    serviceImport.service === "takosumi.account.auth@v1" &&
+    serviceImport.endpointRoles.includes("oidc-issuer")
+  );
+}
+
+function oidcClientAuthMethodForAccounts(
+  method: InstallableAppBinding["tokenEndpointAuthMethod"],
+): InstallOidcClientCreateRequest["tokenEndpointAuthMethod"] | undefined {
+  if (
+    method === "client_secret_basic" || method === "client_secret_post"
+  ) {
+    return method;
+  }
+  if (method === "private_key_jwt") {
+    throw new Error(
+      "identity.oidc@v1 tokenEndpointAuthMethod private_key_jwt is not supported by Takosumi Accounts install materialization yet",
+    );
+  }
+  return undefined;
+}
+
 export async function applyInstall(
   options: ParsedInstallArgs & {
     readonly subcommand: "apply";
@@ -1603,6 +1707,10 @@ export async function applyInstall(
       "source.commit is required for install apply; pin the ref before creating AppInstallation",
     );
   }
+  const oidcClients = installOidcClientCreateRequests(
+    app,
+    options.runtimeBaseUrl,
+  );
   const request = {
     accountId: options.accountId,
     spaceId: options.spaceId,
@@ -1619,6 +1727,7 @@ export async function applyInstall(
     mode,
     createdBySubject: options.createdBySubject,
     serviceImports: buildInstallServiceImportPreview(app),
+    ...(oidcClients.length > 0 ? { oidcClients } : {}),
     bindings: appBindingCreateRequests(app),
     grants: app.permissions.requested.map((capability) => ({
       capability,
@@ -1662,6 +1771,11 @@ export class InstallApplyError extends Error {
 
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, "");
+}
+
+function absoluteUrl(baseUrl: string, path: string): string {
+  const base = `${normalizeBaseUrl(baseUrl)}/`;
+  return new URL(path.replace(/^\/+/, ""), base).toString();
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {
