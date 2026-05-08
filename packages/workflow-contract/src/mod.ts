@@ -60,17 +60,24 @@ export interface ResolvedArtifact {
  * (which would otherwise reject it as an unknown field on the closed
  * resource entry shape).
  *
- * The resolved artifact URI is substituted into `resources[i].spec.image`.
+ * The resolved artifact URI is substituted into `resources[i].spec.image` by
+ * default. Projects can set `target` to another `spec.*` field path, such as
+ * `spec.artifact.hash` for `worker@v1` uploaded bundle hashes.
  *
  * The type is named `ComputeWorkflowRef` for historical reasons (compute
  * = the runtime-bearing resource family); the structural placement is on
- * any resource entry that needs an upstream-resolved image URI.
+ * any resource entry that needs an upstream-resolved artifact URI.
  */
 export interface ComputeWorkflowRef {
   /** Workflow file name relative to the workflows directory (e.g. `build.yml`). */
   readonly file: string;
   /** Job name within the workflow file. */
   readonly job: string;
-  /** Artifact name produced by the job; the resolved URI replaces `spec.image`. */
+  /** Artifact name produced by the job; the resolved URI replaces `target`. */
   readonly artifact: string;
+  /**
+   * Optional manifest field path to receive the resolved artifact URI.
+   * Defaults to `spec.image`. Only dotted paths below `spec` are supported.
+   */
+  readonly target?: `spec.${string}`;
 }

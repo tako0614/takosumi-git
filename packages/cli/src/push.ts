@@ -14,10 +14,10 @@
  *   4. Resolve the artifact URI. The default v1 contract scans successful
  *      step stdout for `TAKOSUMI_ARTIFACT=<uri>`. v0 remains available as a
  *      legacy fallback via `--artifact-contract v0` or auto-detection.
- *   5. Substitute the resolved URI into the corresponding
- *      `resources[i].spec.image` field. takosumi requires a digest-pinned
- *      URI, but we do not enforce that here — it is the workflow's
- *      responsibility to print one.
+ *   5. Substitute the resolved URI into the corresponding resource field.
+ *      The default target is `resources[i].spec.image`; workflowRef.target
+ *      may choose another dotted field below `spec`, such as
+ *      `spec.artifact.hash` for worker bundles.
  *   6. Strip every `workflowRef` field so the kernel receives a clean
  *      manifest matching the closed v1 envelope (kernel rejects unknown
  *      fields on resource entries).
@@ -261,12 +261,16 @@ function extractResourceEntries(
     if (
       typeof ref.file !== "string" ||
       typeof ref.job !== "string" ||
-      typeof ref.artifact !== "string"
+      typeof ref.artifact !== "string" ||
+      (ref.target !== undefined && typeof ref.target !== "string")
     ) {
       throw new Error(
-        `resources[${i}].workflowRef must have string {file, job, artifact}`,
+        `resources[${i}].workflowRef must have string {file, job, artifact, target?}`,
       );
     }
+    const target = ref.target === undefined
+      ? undefined
+      : parseArtifactTarget(ref.target, `resources[${i}].workflowRef.target`);
     const name = typeof raw.name === "string" ? raw.name : `resources[${i}]`;
     entries.push({
       index: i,
@@ -275,10 +279,20 @@ function extractResourceEntries(
         file: ref.file,
         job: ref.job,
         artifact: ref.artifact,
+        ...(target ? { target } : {}),
       },
     });
   }
   return entries;
+}
+
+function parseArtifactTarget(value: string, path: string): `spec.${string}` {
+  if (!/^spec(?:\.[A-Za-z_][A-Za-z0-9_-]*)+$/.test(value)) {
+    throw new Error(
+      `${path} must be a dotted field path below spec, such as spec.image or spec.artifact.hash`,
+    );
+  }
+  return value as `spec.${string}`;
 }
 
 function stripWorkflowRefs(manifest: Record<string, unknown>): void {
@@ -291,10 +305,11 @@ function stripWorkflowRefs(manifest: Record<string, unknown>): void {
   }
 }
 
-function setResourceImage(
+function setResourceArtifactTarget(
   manifest: Record<string, unknown>,
   index: number,
   uri: string,
+  target = "spec.image",
 ): void {
   const resources = manifest.resources;
   if (!Array.isArray(resources)) return;
@@ -303,7 +318,19 @@ function setResourceImage(
   if (!isRecord(entry.spec)) {
     entry.spec = {};
   }
-  (entry.spec as Record<string, unknown>).image = uri;
+  const parts = target.split(".");
+  let current = entry as Record<string, unknown>;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (!isRecord(next)) {
+      const created: Record<string, unknown> = {};
+      current[part] = created;
+      current = created;
+      continue;
+    }
+    current = next;
+  }
+  current[parts[parts.length - 1]] = uri;
 }
 
 function setResourceProvenanceMetadata(
@@ -453,7 +480,12 @@ export async function push(options: PushOptions): Promise<PushResult> {
       );
     }
 
-    setResourceImage(manifest, entry.index, result.artifact.uri);
+    setResourceArtifactTarget(
+      manifest,
+      entry.index,
+      result.artifact.uri,
+      entry.workflowRef.target,
+    );
     const provenance: DeploymentResourceArtifactProvenance = {
       resourceName: entry.name,
       artifactName: result.artifact.name,

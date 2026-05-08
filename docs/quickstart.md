@@ -73,8 +73,8 @@ and failure semantics.
 ## 4. Dry Run
 
 Dry-run executes workflows, strips `workflowRef`, writes the resolved URI into
-`resources[i].spec.image`, and prints the cleaned manifest without sending it to
-the kernel:
+`resources[i].spec.image` by default, or into `workflowRef.target` when set, and
+prints the cleaned manifest without sending it to the kernel:
 
 ```bash
 deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push --dry-run

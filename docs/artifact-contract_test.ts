@@ -10,6 +10,8 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
     const snippet of [
       "resources[i].workflowRef",
       "resources[i].spec.image",
+      "workflowRef.target",
+      "spec.artifact.hash",
       "TAKOSUMI_ARTIFACT=<uri>",
       "final non-empty stdout line",
       "[stderr]",
@@ -30,7 +32,7 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
       "artifactContractResolver",
       "lastLineArtifactResolver",
       "parseArtifactContract",
-      "setResourceImage",
+      "setResourceArtifactTarget",
       "stripWorkflowRefs",
       "workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI",
       "workflow job '${jobName}' produced no stdout; cannot resolve artifact URI",
@@ -78,8 +80,10 @@ Deno.test("quickstart and workflow-ref docs pin the project convention", async (
       "resources[i].workflowRef",
       "ComputeWorkflowRef",
       "resources[i].spec.image",
+      "workflowRef.target",
+      "spec.artifact.hash",
       "stripped before `POST /v1/deployments`",
-      "resources[i].workflowRef must have string {file, job, artifact}",
+      "resources[i].workflowRef must have string {file, job, artifact, target?}",
     ]
   ) {
     assert.ok(workflowRef.includes(snippet), `workflowRef missing ${snippet}`);

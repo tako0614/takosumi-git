@@ -27,8 +27,10 @@ resources:
 ```
 
 `resources[i].workflowRef` is read by `takosumi-git push`, then stripped before
-the manifest is posted to the kernel. The resolved URI is written to
-`resources[i].spec.image`.
+the manifest is posted to the kernel. By default, the resolved URI is written to
+`resources[i].spec.image`. A resource can set `workflowRef.target` to another
+dotted field below `spec`, such as `spec.artifact.hash`, when the provider
+expects a different artifact field.
 
 ## v1 Producer Rule
 
@@ -57,7 +59,8 @@ The v1 resolver intentionally does not parse JSON envelopes, files, or shell
 environment state from the child process. The marker must be printed to stdout.
 It also does not validate the URI scheme or digest pin; a bad URI may be
 rejected later by Takosumi or by the provider. Workflow authors should print a
-digest-pinned OCI image URI for `web-service@v1`.
+digest-pinned OCI image URI for `web-service@v1`, or a provider-specific
+immutable artifact reference when `workflowRef.target` writes to another field.
 
 ## Legacy v0 Contract
 
@@ -117,8 +120,9 @@ or `--artifact-contract auto`.
 ## Drift Check
 
 - Source of truth: `packages/cli/src/push.ts` (`artifactContractResolver`,
-  `lastLineArtifactResolver`, `parseArtifactContract`, `setResourceImage`,
-  `setResourceProvenanceMetadata`, `stripWorkflowRefs`).
+  `lastLineArtifactResolver`, `parseArtifactContract`,
+  `setResourceArtifactTarget`, `setResourceProvenanceMetadata`,
+  `stripWorkflowRefs`).
 - Contract types: `packages/workflow-contract/src/mod.ts` (`ComputeWorkflowRef`,
   `ResolvedArtifact`, `WorkflowJobSpec`).
 - Tests: `packages/cli/src/push_test.ts` and `docs/artifact-contract_test.ts`.

@@ -13,6 +13,7 @@ interface ComputeWorkflowRef {
   readonly file: string;
   readonly job: string;
   readonly artifact: string;
+  readonly target?: `spec.${string}`;
 }
 ```
 
@@ -29,13 +30,16 @@ resources:
       file: build.yml
       job: image
       artifact: image
+      # Optional. Defaults to spec.image.
+      target: spec.image
 ```
 
-| Field      | Meaning                                                                                        |
-| ---------- | ---------------------------------------------------------------------------------------------- |
-| `file`     | Workflow YAML file name resolved relative to `--workflows-dir` (default `.takosumi/workflows`) |
-| `job`      | Job name inside the workflow file                                                              |
-| `artifact` | Artifact name expected from the job; used as the fallback resolved artifact name               |
+| Field      | Meaning                                                                                             |
+| ---------- | --------------------------------------------------------------------------------------------------- |
+| `file`     | Workflow YAML file name resolved relative to `--workflows-dir` (default `.takosumi/workflows`)      |
+| `job`      | Job name inside the workflow file                                                                   |
+| `artifact` | Artifact name expected from the job; used as the fallback resolved artifact name                    |
+| `target`   | Optional dotted field path below `spec`; defaults to `spec.image`, for example `spec.artifact.hash` |
 
 ## Resolution Flow
 
@@ -45,7 +49,8 @@ resources:
 4. It runs `workflowRef.job`.
 5. It resolves the job artifact URI according to
    [Artifact URI Contract](./artifact-contract.md).
-6. It writes the URI to `resources[i].spec.image`.
+6. It writes the URI to `workflowRef.target`, or to `resources[i].spec.image`
+   when `target` is omitted.
 7. It adds resource-level `metadata.takosumiGitProvenance` with digests for the
    resolved artifact chain.
 8. It deletes `workflowRef` from every resource entry.
@@ -63,18 +68,18 @@ resources:
   - name: web
     shape: web-service@v1
     provider: "@takos/aws-fargate"
-        spec:
-          port: 8080
-          image: ghcr.io/example/demo@sha256:0123456789abcdef
-        metadata:
-          takosumiGitProvenance:
-            kind: takosumi-git.resource-provenance@v1
-            provenanceDigest: sha256:...
-            workflowRunId: takosumi-git:run:...
-            gitCommitSha: 0123456789abcdef0123456789abcdef01234567
-            artifactUri: ghcr.io/example/demo@sha256:0123456789abcdef
-            stepLogDigests:
-              - sha256:...
+    spec:
+      port: 8080
+      image: ghcr.io/example/demo@sha256:0123456789abcdef
+    metadata:
+      takosumiGitProvenance:
+        kind: takosumi-git.resource-provenance@v1
+        provenanceDigest: sha256:...
+        workflowRunId: takosumi-git:run:...
+        gitCommitSha: 0123456789abcdef0123456789abcdef01234567
+        artifactUri: ghcr.io/example/demo@sha256:0123456789abcdef
+        stepLogDigests:
+          - sha256:...
 ```
 
 The kernel also receives an optional top-level
@@ -86,11 +91,13 @@ Build and git concerns stay in takosumi-git.
 
 ## Validation and Errors
 
-`push` requires `file`, `job`, and `artifact` to be strings. Invalid entries
-fail before the kernel request with:
+`push` requires `file`, `job`, and `artifact` to be strings. `target`, when
+present, must be a dotted field path below `spec`. Invalid entries fail before
+the kernel request with:
 
 ```text
-resources[i].workflowRef must have string {file, job, artifact}
+resources[i].workflowRef must have string {file, job, artifact, target?}
+resources[i].workflowRef.target must be a dotted field path below spec, such as spec.image or spec.artifact.hash
 ```
 
 If the workflow job is missing, a step fails, or no artifact URI can be

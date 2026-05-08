@@ -197,6 +197,145 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
   }
 });
 
+Deno.test("push can write workflow artifacts to a workflowRef target path", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      metadata: { name: "worker-demo" },
+      resources: [
+        {
+          shape: "worker@v1",
+          name: "web",
+          provider: "@takos/cloudflare-workers",
+          spec: {
+            artifact: {
+              kind: "js-bundle",
+              hash: "PLACEHOLDER",
+            },
+            compatibilityDate: "2026-05-09",
+          },
+          workflowRef: {
+            file: "build.yml",
+            job: "build-worker",
+            artifact: "bundle",
+            target: "spec.artifact.hash",
+          },
+        },
+      ],
+    },
+    workflows: {
+      "build.yml": {
+        version: "0",
+        jobs: [
+          {
+            name: "build-worker",
+            steps: [{ name: "build", run: "true" }],
+            artifact: { name: "bundle" },
+          },
+        ],
+      },
+    },
+  });
+
+  const workerBundle: StepExecutor = () =>
+    Promise.resolve({
+      stdout: "TAKOSUMI_ARTIFACT=sha256:bundledeadbeef\n",
+      exitCode: 0,
+    });
+
+  try {
+    const result = await push({
+      endpoint: "http://nope",
+      token: "x",
+      manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+      workflowsDir: join(project.root, ".takosumi", "workflows"),
+      mode: "apply",
+      dryRun: true,
+      executorFactory: () => workerBundle,
+      workflowRunIdFactory: () => "takosumi-git:run:worker-target",
+      now: () => "2026-05-09T00:00:00.000Z",
+      git: fakeGit,
+      stdout: () => {},
+    });
+
+    const resources = result.manifest.resources as Array<
+      Record<string, unknown>
+    >;
+    const worker = resources[0];
+    const spec = worker.spec as Record<string, unknown>;
+    const artifact = spec.artifact as Record<string, unknown>;
+    assertEquals(artifact.kind, "js-bundle");
+    assertEquals(artifact.hash, "sha256:bundledeadbeef");
+    assertEquals(spec.image, undefined);
+    assert(!("workflowRef" in worker), "workflowRef must be stripped");
+  } finally {
+    await project.cleanup();
+  }
+});
+
+Deno.test("push rejects workflowRef target paths outside spec", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      metadata: { name: "bad-target" },
+      resources: [
+        {
+          shape: "worker@v1",
+          name: "worker",
+          provider: "@takos/cloudflare-workers",
+          spec: {
+            artifact: {
+              kind: "js-bundle",
+              hash: "PLACEHOLDER",
+            },
+            compatibilityDate: "2026-05-09",
+          },
+          workflowRef: {
+            file: "build.yml",
+            job: "build-worker",
+            artifact: "bundle",
+            target: "metadata.artifactHash",
+          },
+        },
+      ],
+    },
+    workflows: {
+      "build.yml": {
+        version: "0",
+        jobs: [
+          {
+            name: "build-worker",
+            steps: [{ name: "build", run: "true" }],
+            artifact: { name: "bundle" },
+          },
+        ],
+      },
+    },
+  });
+
+  try {
+    await assertRejects(
+      () =>
+        push({
+          endpoint: "http://nope",
+          token: "x",
+          manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+          workflowsDir: join(project.root, ".takosumi", "workflows"),
+          mode: "apply",
+          dryRun: true,
+          executorFactory: () => fakeOk,
+          stdout: () => {},
+        }),
+      Error,
+      "workflowRef.target must be a dotted field path below spec",
+    );
+  } finally {
+    await project.cleanup();
+  }
+});
+
 Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async () => {
   const project = await makeProject({
     manifest: {
