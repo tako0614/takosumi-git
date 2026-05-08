@@ -10,6 +10,11 @@ import { createHash } from "node:crypto";
 import { parseArgs } from "@std/cli/parse-args";
 import { parse as parseYaml } from "@std/yaml";
 import { dirname, isAbsolute, join, resolve } from "@std/path";
+import {
+  type DeployResponse,
+  type ManifestEnvelope,
+  postDeployment,
+} from "@takos/takosumi-git-deploy-client";
 
 export const INSTALLABLE_APP_API_VERSION = "app.takosumi.dev/v1";
 export const INSTALLABLE_APP_KIND = "InstallableApp";
@@ -1409,6 +1414,15 @@ export interface ParsedInstallArgs {
   readonly mode?: InstallableAppRuntimeMode;
   readonly sourceCommit?: string;
   readonly runtimeBaseUrl?: string;
+  readonly endpoint?: string;
+  readonly deployToken?: string;
+  readonly serviceResolvers?: readonly InstallServiceResolverConfig[];
+}
+
+export interface InstallServiceResolverConfig {
+  readonly kind: "anchor";
+  readonly url: string;
+  readonly publicKey: string;
 }
 
 export function parseInstallArgs(
@@ -1439,6 +1453,10 @@ export function parseInstallArgs(
       "mode",
       "source-commit",
       "runtime-base-url",
+      "endpoint",
+      "deploy-token",
+      "service-resolver-url",
+      "service-resolver-public-key",
     ],
     boolean: ["json"],
     default: {
@@ -1468,8 +1486,25 @@ export function parseInstallArgs(
     (flags["runtime-base-url"] as string | undefined) ??
       env.get("TAKOSUMI_RUNTIME_BASE_URL"),
   );
+  const endpoint = (flags.endpoint as string | undefined) ??
+    env.get("TAKOSUMI_ENDPOINT");
+  const deployToken = endpoint
+    ? (flags["deploy-token"] as string | undefined) ??
+      env.get("TAKOSUMI_DEPLOY_TOKEN") ?? env.get("TAKOSUMI_TOKEN")
+    : (flags["deploy-token"] as string | undefined);
+  const serviceResolverUrl = (flags["service-resolver-url"] as
+    | string
+    | undefined) ?? env.get("TAKOSUMI_SERVICE_RESOLVER_URL");
+  const serviceResolverPublicKey = (flags["service-resolver-public-key"] as
+    | string
+    | undefined) ?? env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
   if (sourceCommit && !fullCommitPattern.test(sourceCommit)) {
     throw new Error("--source-commit must be a 40-char SHA");
+  }
+  if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
+    throw new Error(
+      "--service-resolver-url and --service-resolver-public-key must be provided together",
+    );
   }
   if (subcommand === "apply") {
     if (!accountsUrl) {
@@ -1483,6 +1518,14 @@ export function parseInstallArgs(
     }
     if (!createdBySubject) {
       throw new Error("missing --subject (or TAKOSUMI_SUBJECT/TAKOS_SUBJECT)");
+    }
+    if (endpoint && !deployToken) {
+      throw new Error(
+        "missing --deploy-token (or TAKOSUMI_DEPLOY_TOKEN/TAKOSUMI_TOKEN)",
+      );
+    }
+    if (deployToken && !endpoint) {
+      throw new Error("missing --endpoint (or TAKOSUMI_ENDPOINT)");
     }
   }
   return {
@@ -1501,6 +1544,17 @@ export function parseInstallArgs(
     ...(mode ? { mode } : {}),
     ...(sourceCommit ? { sourceCommit } : {}),
     ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
+    ...(endpoint ? { endpoint } : {}),
+    ...(deployToken ? { deployToken } : {}),
+    ...(serviceResolverUrl && serviceResolverPublicKey
+      ? {
+        serviceResolvers: [{
+          kind: "anchor" as const,
+          url: serviceResolverUrl,
+          publicKey: serviceResolverPublicKey,
+        }],
+      }
+      : {}),
   };
 }
 
@@ -1567,11 +1621,18 @@ APPLY OPTIONS:
   --source-commit <sha> resolved 40-char source commit pin
   --runtime-base-url <url>
                         app runtime base URL for OIDC redirect materialization
+  --endpoint <url>      takosumi kernel endpoint for deploy (or TAKOSUMI_ENDPOINT)
+  --deploy-token <tok>  kernel deploy token (or TAKOSUMI_DEPLOY_TOKEN/TAKOSUMI_TOKEN)
+  --service-resolver-url <url>
+                        service descriptor anchor URL for kernel deploy
+  --service-resolver-public-key <key>
+                        Ed25519 public key for the anchor
 `;
 
 interface InstallContext {
   readonly app: InstallableApp;
   readonly preview: InstallPreview;
+  readonly compiledManifest?: CompiledInstallManifest;
 }
 
 async function loadInstallContext(
@@ -1593,6 +1654,7 @@ async function loadInstallContext(
     : [`entry manifest not found at ${manifestPath}`];
   return {
     app,
+    ...(compiledManifest ? { compiledManifest } : {}),
     preview: buildInstallPreview(app, {
       appManifestDigest: digestText(appText),
       ...(compiledManifest
@@ -1616,6 +1678,7 @@ export interface InstallApplyResult {
     readonly status: number;
     readonly body: unknown;
   };
+  readonly deployment?: DeployResponse;
 }
 
 function appBindingCreateRequests(
@@ -1695,7 +1758,7 @@ export async function applyInstall(
     readonly fetch?: typeof fetch;
   },
 ): Promise<InstallApplyResult> {
-  const { app, preview } = await loadInstallContext(options);
+  const { app, preview, compiledManifest } = await loadInstallContext(options);
   const mode = options.mode ?? app.runtime.modes[0];
   if (!app.runtime.modes.includes(mode)) {
     throw new Error(`mode ${mode} is not supported by ${app.metadata.id}`);
@@ -1737,6 +1800,19 @@ export async function applyInstall(
       },
     })),
   };
+  const deployEndpoint = options.endpoint;
+  const deployToken = options.deployToken;
+  if (deployEndpoint && !deployToken) {
+    throw new Error(
+      "missing --deploy-token (or TAKOSUMI_DEPLOY_TOKEN/TAKOSUMI_TOKEN)",
+    );
+  }
+  const deployRequest = deployEndpoint
+    ? buildInstallDeployRequest(
+      compiledManifest,
+      options.serviceResolvers ?? [],
+    )
+    : undefined;
   const response = await (options.fetch ?? fetch)(
     `${normalizeBaseUrl(options.accountsUrl)}/v1/installations`,
     {
@@ -1752,6 +1828,19 @@ export async function applyInstall(
   if (response.status >= 400) {
     throw new InstallApplyError(response.status, body);
   }
+  let deployment: DeployResponse | undefined;
+  if (deployRequest) {
+    if (!deployEndpoint || !deployToken) {
+      throw new Error("kernel deploy endpoint and token are required");
+    }
+    deployment = await postDeployment({
+      endpoint: deployEndpoint,
+      token: deployToken,
+      fetch: options.fetch,
+      idempotencyKey:
+        `takosumi-git-install:${app.metadata.id}:${sourceCommit}:${compiledManifest?.digest}`,
+    }, deployRequest);
+  }
   return {
     preview,
     request,
@@ -1759,7 +1848,78 @@ export async function applyInstall(
       status: response.status,
       body,
     },
+    ...(deployment ? { deployment } : {}),
   };
+}
+
+function buildInstallDeployRequest(
+  compiledManifest: CompiledInstallManifest | undefined,
+  serviceResolvers: readonly InstallServiceResolverConfig[],
+): { readonly mode: "apply"; readonly manifest: ManifestEnvelope } {
+  if (!compiledManifest) {
+    throw new Error("entry manifest is required for install apply deploy");
+  }
+  const manifest = structuredClone(compiledManifest.manifest);
+  const serviceImports = readKernelManifestServiceImports(manifest);
+  applyInstallServiceResolvers({
+    manifest,
+    serviceImportCount: serviceImports.length,
+    serviceResolvers,
+  });
+  return {
+    mode: "apply",
+    manifest: manifest as unknown as ManifestEnvelope,
+  };
+}
+
+function readKernelManifestServiceImports(
+  manifest: Record<string, unknown>,
+): readonly KernelManifestServiceImport[] {
+  const imports = manifest.imports;
+  if (imports === undefined) return [];
+  if (!Array.isArray(imports)) {
+    throw new Error("manifest.imports must be an array");
+  }
+  return imports.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`manifest.imports[${index}] must be an object`);
+    }
+    if (typeof entry.alias !== "string" || typeof entry.service !== "string") {
+      throw new Error(
+        `manifest.imports[${index}] must declare alias and service`,
+      );
+    }
+    return {
+      alias: entry.alias,
+      service: entry.service,
+      ...(entry.refreshPolicy !== undefined
+        ? { refreshPolicy: entry.refreshPolicy as Record<string, unknown> }
+        : {}),
+    };
+  });
+}
+
+function applyInstallServiceResolvers(input: {
+  manifest: Record<string, unknown>;
+  serviceImportCount: number;
+  serviceResolvers: readonly InstallServiceResolverConfig[];
+}): void {
+  if (input.serviceImportCount === 0) return;
+  const existing = input.manifest.serviceResolvers;
+  if (existing !== undefined && !Array.isArray(existing)) {
+    throw new Error("manifest.serviceResolvers must be an array");
+  }
+  if (Array.isArray(existing) && existing.length > 0) return;
+  if (input.serviceResolvers.length === 0) {
+    throw new Error(
+      "service imports require serviceResolvers; pass --service-resolver-url and --service-resolver-public-key",
+    );
+  }
+  input.manifest.serviceResolvers = input.serviceResolvers.map((resolver) => ({
+    kind: resolver.kind,
+    url: resolver.url,
+    publicKey: resolver.publicKey,
+  }));
 }
 
 export class InstallApplyError extends Error {

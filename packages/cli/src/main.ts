@@ -63,6 +63,11 @@ INSTALL OPTIONS:
   --mode <mode>                shared-cell | dedicated | self-hosted
   --source-commit <sha>        resolved 40-char source commit pin
   --runtime-base-url <url>     app runtime base URL for OIDC redirects
+  --endpoint <url>             takosumi kernel endpoint for deploy
+  --deploy-token <token>       kernel deploy token
+  --service-resolver-url <url> service descriptor anchor URL
+  --service-resolver-public-key <key>
+                               Ed25519 public key for the anchor
   --json                       print preview JSON
 
 HISTORY OPTIONS:

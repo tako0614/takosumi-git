@@ -367,6 +367,11 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
         TAKOSUMI_SUBJECT: "tsub_owner",
         TAKOS_TOKEN: "secret",
         TAKOSUMI_RUNTIME_BASE_URL: "https://hello.example",
+        TAKOSUMI_ENDPOINT: "https://kernel.example",
+        TAKOSUMI_DEPLOY_TOKEN: "deploy-secret",
+        TAKOSUMI_SERVICE_RESOLVER_URL:
+          "https://anchor.example.test/v1/services/",
+        TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY: "ed25519:pub",
       };
       return env[key];
     },
@@ -381,6 +386,13 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.mode, "dedicated");
   assertEquals(parsed.sourceCommit, "abcdefabcdefabcdefabcdefabcdefabcdefabcd");
   assertEquals(parsed.runtimeBaseUrl, "https://hello.example");
+  assertEquals(parsed.endpoint, "https://kernel.example");
+  assertEquals(parsed.deployToken, "deploy-secret");
+  assertEquals(parsed.serviceResolvers, [{
+    kind: "anchor",
+    url: "https://anchor.example.test/v1/services/",
+    publicKey: "ed25519:pub",
+  }]);
 });
 
 Deno.test("applyInstall posts AppInstallation create request", async () => {
@@ -480,8 +492,22 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
       runtimeBaseUrl: "http://localhost:8787",
+      endpoint: "http://kernel.example/",
+      deployToken: "deploy-secret",
+      serviceResolvers: [{
+        kind: "anchor",
+        url: "https://anchor.example.test/v1/services/",
+        publicKey: "ed25519:pub",
+      }],
       fetch: (input, init) => {
         requests.push(new Request(input, init));
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Promise.resolve(Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          }));
+        }
         return Promise.resolve(Response.json({
           installation: { id: "inst_1" },
         }, { status: 202 }));
@@ -492,6 +518,8 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       result.preview.serviceImports[0].service,
       "takosumi.account.auth@v1",
     );
+    assertEquals(result.deployment?.status, 200);
+    assertEquals(requests.length, 2);
     const body = await requests[0].json();
     assertEquals(body.serviceImports, [{
       binding: "account-auth",
@@ -512,6 +540,23 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       redirectUris: ["http://localhost:8787/auth/oidc/callback"],
       allowedScopes: ["openid", "profile"],
       subjectMode: "pairwise",
+    }]);
+    assertEquals(requests[1].url, "http://kernel.example/v1/deployments");
+    assertEquals(
+      requests[1].headers.get("authorization"),
+      "Bearer deploy-secret",
+    );
+    const deployBody = await requests[1].json();
+    assertEquals(deployBody.mode, "apply");
+    assertEquals(deployBody.manifest.imports, [{
+      alias: "account-auth",
+      service: "takosumi.account.auth@v1",
+      refreshPolicy: { kind: "ttl", ttl: "300s" },
+    }]);
+    assertEquals(deployBody.manifest.serviceResolvers, [{
+      kind: "anchor",
+      url: "https://anchor.example.test/v1/services/",
+      publicKey: "ed25519:pub",
     }]);
   } finally {
     await Deno.remove(root, { recursive: true });
