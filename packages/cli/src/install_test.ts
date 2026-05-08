@@ -294,6 +294,22 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
       body.source.commit,
       "0123456789abcdef0123456789abcdef01234567",
     );
+    assertEquals(body.bindings.length, 4);
+    assertEquals(
+      body.bindings.map((binding: { name: string }) => binding.name),
+      [
+        "auth",
+        "blob",
+        "bootstrap",
+        "database",
+      ],
+    );
+    assertEquals(body.bindings[0].kind, "identity.oidc@v1");
+    assertStringIncludes(
+      body.bindings[0].configRef,
+      "takosumi-git://installable-app/example.hello/bindings/auth/sha256:",
+    );
+    assertEquals(body.bindings[0].secretRefs, []);
     assertEquals(body.grants.length, 2);
   } finally {
     await Deno.remove(root, { recursive: true });

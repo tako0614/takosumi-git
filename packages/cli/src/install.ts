@@ -1311,6 +1311,20 @@ export interface InstallApplyResult {
   };
 }
 
+function appBindingCreateRequests(
+  app: InstallableApp,
+): Record<string, unknown>[] {
+  return Object.entries(app.bindings).map(([name, binding]) => ({
+    name,
+    kind: binding.type,
+    configRef:
+      `takosumi-git://installable-app/${app.metadata.id}/bindings/${name}/${
+        digestJson(binding)
+      }`,
+    secretRefs: [],
+  })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
+}
+
 export async function applyInstall(
   options: ParsedInstallArgs & {
     readonly subcommand: "apply";
@@ -1348,6 +1362,7 @@ export async function applyInstall(
     },
     mode,
     createdBySubject: options.createdBySubject,
+    bindings: appBindingCreateRequests(app),
     grants: app.permissions.requested.map((capability) => ({
       capability,
       scope: {
