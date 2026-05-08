@@ -96,8 +96,18 @@ The kernel deploy step requires `--deploy-token` (or `TAKOSUMI_DEPLOY_TOKEN` /
 include `serviceResolvers[]`, apply also requires `--service-resolver-url` and
 `--service-resolver-public-key` so service descriptors can be resolved and
 pinned by the kernel. A kernel HTTP 4xx/5xx response makes the CLI exit
-non-zero. Takosumi Accounts does not yet define a post-deploy ready/failed
-callback in this package.
+non-zero.
+
+After the kernel response, `install apply` updates the AppInstallation ledger:
+
+```text
+PATCH /v1/installations/{installation-id}/status
+```
+
+The status is `ready` after a successful kernel response and `failed` after a
+kernel HTTP 4xx/5xx response. The request includes a reason such as
+`kernel deploy HTTP 200` so the Accounts event hash chain can explain the
+transition.
 
 AppBinding records created at this step intentionally carry pending `configRef`
 values:

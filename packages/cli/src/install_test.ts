@@ -508,6 +508,11 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
             outcome: { status: "succeeded" },
           }));
         }
+        if (url.includes("/status")) {
+          return Promise.resolve(Response.json({
+            installation: { id: "inst_1", status: "ready" },
+          }));
+        }
         return Promise.resolve(Response.json({
           installation: { id: "inst_1" },
         }, { status: 202 }));
@@ -519,7 +524,8 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       "takosumi.account.auth@v1",
     );
     assertEquals(result.deployment?.status, 200);
-    assertEquals(requests.length, 2);
+    assertEquals(result.statusTransition?.status, 200);
+    assertEquals(requests.length, 3);
     const body = await requests[0].json();
     assertEquals(body.serviceImports, [{
       binding: "account-auth",
@@ -558,6 +564,15 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       url: "https://anchor.example.test/v1/services/",
       publicKey: "ed25519:pub",
     }]);
+    assertEquals(
+      requests[2].url,
+      "http://accounts.example/v1/installations/inst_1/status",
+    );
+    assertEquals(requests[2].method, "PATCH");
+    assertEquals(await requests[2].json(), {
+      status: "ready",
+      reason: "kernel deploy HTTP 200",
+    });
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -570,6 +585,7 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
   const originalStderrWrite = Deno.stderr.writeSync.bind(Deno.stderr);
   const stdout: string[] = [];
   const stderr: string[] = [];
+  const requests: Request[] = [];
   try {
     await Deno.mkdir(join(root, ".takosumi"));
     await Deno.writeTextFile(
@@ -582,12 +598,18 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
     );
     globalThis.fetch = ((input: URL | RequestInfo, init?: RequestInit) => {
       const request = new Request(input, init);
+      requests.push(request);
       if (request.url.includes("/v1/deployments")) {
         return Promise.resolve(
           Response.json({ error: "provider rejected manifest" }, {
             status: 422,
           }),
         );
+      }
+      if (request.url.includes("/status")) {
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1", status: "failed" },
+        }));
       }
       return Promise.resolve(Response.json({
         installation: { id: "inst_1" },
@@ -626,6 +648,12 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
 
     assertEquals(code, 1);
     assertStringIncludes(stdout.join(""), "kernel response: HTTP 422");
+    assertStringIncludes(stdout.join(""), "status response: HTTP 200");
+    assertEquals(requests.length, 3);
+    assertEquals(await requests[2].json(), {
+      status: "failed",
+      reason: "kernel deploy HTTP 422",
+    });
     assertEquals(stderr.join(""), "");
   } finally {
     globalThis.fetch = originalFetch;

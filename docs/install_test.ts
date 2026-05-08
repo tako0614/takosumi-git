@@ -18,6 +18,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "takosumi-git install apply",
       "POST /v1/installations",
       "POST /v1/deployments",
+      "PATCH /v1/installations/{installation-id}/status",
       "--source-commit",
       "--endpoint",
       "--deploy-token",
@@ -27,6 +28,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY",
       "A kernel HTTP 4xx/5xx response makes the CLI exit",
       "non-zero",
+      "kernel deploy HTTP 200",
       "Preview is non-mutating",
     ]
   ) {
@@ -44,6 +46,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "source.commit is required for install apply",
       "POST",
       "/v1/installations",
+      "patchInstallationStatus",
       "sourceCommit",
     ]
   ) {

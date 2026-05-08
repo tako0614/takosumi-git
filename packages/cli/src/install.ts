@@ -1679,6 +1679,10 @@ export interface InstallApplyResult {
     readonly body: unknown;
   };
   readonly deployment?: DeployResponse;
+  readonly statusTransition?: {
+    readonly status: number;
+    readonly body: unknown;
+  };
 }
 
 function appBindingCreateRequests(
@@ -1829,17 +1833,47 @@ export async function applyInstall(
     throw new InstallApplyError(response.status, body);
   }
   let deployment: DeployResponse | undefined;
+  let statusTransition:
+    | { readonly status: number; readonly body: unknown }
+    | undefined;
   if (deployRequest) {
     if (!deployEndpoint || !deployToken) {
       throw new Error("kernel deploy endpoint and token are required");
     }
-    deployment = await postDeployment({
-      endpoint: deployEndpoint,
-      token: deployToken,
+    const installationId = readInstallationId(body);
+    if (!installationId) {
+      throw new Error(
+        "accounts response missing installation id for deploy status transition",
+      );
+    }
+    try {
+      deployment = await postDeployment({
+        endpoint: deployEndpoint,
+        token: deployToken,
+        fetch: options.fetch,
+        idempotencyKey:
+          `takosumi-git-install:${app.metadata.id}:${sourceCommit}:${compiledManifest?.digest}`,
+      }, deployRequest);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      statusTransition = await patchInstallationStatus({
+        accountsUrl: options.accountsUrl,
+        token: options.token,
+        installationId,
+        status: "failed",
+        reason: `kernel deploy failed: ${message}`,
+        fetch: options.fetch,
+      });
+      throw error;
+    }
+    statusTransition = await patchInstallationStatus({
+      accountsUrl: options.accountsUrl,
+      token: options.token,
+      installationId,
+      status: deployment.status >= 400 ? "failed" : "ready",
+      reason: `kernel deploy HTTP ${deployment.status}`,
       fetch: options.fetch,
-      idempotencyKey:
-        `takosumi-git-install:${app.metadata.id}:${sourceCommit}:${compiledManifest?.digest}`,
-    }, deployRequest);
+    });
   }
   return {
     preview,
@@ -1849,7 +1883,39 @@ export async function applyInstall(
       body,
     },
     ...(deployment ? { deployment } : {}),
+    ...(statusTransition ? { statusTransition } : {}),
   };
+}
+
+async function patchInstallationStatus(input: {
+  readonly accountsUrl: string;
+  readonly token?: string;
+  readonly installationId: string;
+  readonly status: "ready" | "failed";
+  readonly reason: string;
+  readonly fetch?: typeof fetch;
+}): Promise<{ readonly status: number; readonly body: unknown }> {
+  const response = await (input.fetch ?? fetch)(
+    `${normalizeBaseUrl(input.accountsUrl)}/v1/installations/${
+      encodeURIComponent(input.installationId)
+    }/status`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
+      },
+      body: JSON.stringify({
+        status: input.status,
+        reason: input.reason,
+      }),
+    },
+  );
+  const body = await readResponseBody(response);
+  if (response.status >= 400) {
+    throw new InstallApplyError(response.status, body);
+  }
+  return { status: response.status, body };
 }
 
 function buildInstallDeployRequest(
@@ -1999,13 +2065,8 @@ export async function runInstallCli(args: readonly string[]): Promise<number> {
 }
 
 function renderApplyResult(result: InstallApplyResult): string {
-  const body = isRecord(result.response.body) ? result.response.body : {};
-  const installation = isRecord(body.installation) ? body.installation : {};
-  const installationId = typeof installation.id === "string"
-    ? installation.id
-    : typeof installation.installation_id === "string"
-    ? installation.installation_id
-    : "(unknown)";
+  const installationId = readInstallationId(result.response.body) ??
+    "(unknown)";
   return [
     "takosumi-git install apply",
     `app: ${result.preview.app.name} (${result.preview.app.id})`,
@@ -2014,6 +2075,19 @@ function renderApplyResult(result: InstallApplyResult): string {
     ...(result.deployment
       ? [`kernel response: HTTP ${result.deployment.status}`]
       : []),
+    ...(result.statusTransition
+      ? [`status response: HTTP ${result.statusTransition.status}`]
+      : []),
     "",
   ].join("\n");
+}
+
+function readInstallationId(body: unknown): string | undefined {
+  const record = isRecord(body) ? body : {};
+  const installation = isRecord(record.installation) ? record.installation : {};
+  return typeof installation.id === "string"
+    ? installation.id
+    : typeof installation.installation_id === "string"
+    ? installation.installation_id
+    : undefined;
 }
