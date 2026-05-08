@@ -563,6 +563,80 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
   }
 });
 
+Deno.test("runInstallCli returns failure when kernel deploy fails", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const originalFetch = globalThis.fetch;
+  const originalStdoutWrite = Deno.stdout.writeSync.bind(Deno.stdout);
+  const originalStderrWrite = Deno.stderr.writeSync.bind(Deno.stderr);
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+    globalThis.fetch = ((input: URL | RequestInfo, init?: RequestInit) => {
+      const request = new Request(input, init);
+      if (request.url.includes("/v1/deployments")) {
+        return Promise.resolve(
+          Response.json({ error: "provider rejected manifest" }, {
+            status: 422,
+          }),
+        );
+      }
+      return Promise.resolve(Response.json({
+        installation: { id: "inst_1" },
+      }, { status: 202 }));
+    }) as typeof fetch;
+    (Deno.stdout as { writeSync: (p: Uint8Array) => number }).writeSync = (
+      p: Uint8Array,
+    ) => {
+      stdout.push(new TextDecoder().decode(p));
+      return p.byteLength;
+    };
+    (Deno.stderr as { writeSync: (p: Uint8Array) => number }).writeSync = (
+      p: Uint8Array,
+    ) => {
+      stderr.push(new TextDecoder().decode(p));
+      return p.byteLength;
+    };
+
+    const code = await runInstallCli([
+      "apply",
+      "--cwd",
+      root,
+      "--accounts-url",
+      "http://accounts.example",
+      "--account-id",
+      "acct_1",
+      "--space-id",
+      "space_1",
+      "--subject",
+      "tsub_owner",
+      "--endpoint",
+      "http://kernel.example",
+      "--deploy-token",
+      "deploy-secret",
+    ]);
+
+    assertEquals(code, 1);
+    assertStringIncludes(stdout.join(""), "kernel response: HTTP 422");
+    assertEquals(stderr.join(""), "");
+  } finally {
+    globalThis.fetch = originalFetch;
+    (Deno.stdout as { writeSync: (p: Uint8Array) => number }).writeSync =
+      originalStdoutWrite;
+    (Deno.stderr as { writeSync: (p: Uint8Array) => number }).writeSync =
+      originalStderrWrite;
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("applyInstall requires a pinned source commit", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
   try {

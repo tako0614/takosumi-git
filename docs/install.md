@@ -4,7 +4,8 @@
 `.takosumi/app.yml`. The app file is installer-bound metadata: it is parsed by
 takosumi-git, shown to the user before approval, and used to create an
 AppInstallation ledger record in Takosumi Accounts. It is never posted to the
-takosumi kernel.
+takosumi kernel. When apply is given a Takosumi kernel endpoint, the compiled
+kernel manifest is posted separately after the Accounts ledger request.
 
 ## Files
 
@@ -62,7 +63,9 @@ takosumi-git install apply \
   --subject tsub_... \
   --source-commit 0123456789abcdef0123456789abcdef01234567 \
   --runtime-base-url https://app.example.com \
-  --mode shared-cell
+  --mode shared-cell \
+  --endpoint "$TAKOSUMI_ENDPOINT" \
+  --deploy-token "$TAKOSUMI_DEPLOY_TOKEN"
 ```
 
 `install apply` posts to Takosumi Accounts:
@@ -80,6 +83,21 @@ derived from `service.import@v1`, and AppGrant records derived from
 materialized into absolute redirect URIs and sent as an `oidcClients[]` request
 so Takosumi Accounts can create the per-installation OIDC client in the same
 ledger transaction.
+
+If `--endpoint` (or `TAKOSUMI_ENDPOINT`) is supplied, `install apply` then posts
+the compiled manifest to the Takosumi kernel:
+
+```text
+POST /v1/deployments
+```
+
+The kernel deploy step requires `--deploy-token` (or `TAKOSUMI_DEPLOY_TOKEN` /
+`TAKOSUMI_TOKEN`). If the manifest contains `imports[]` and does not already
+include `serviceResolvers[]`, apply also requires `--service-resolver-url` and
+`--service-resolver-public-key` so service descriptors can be resolved and
+pinned by the kernel. A kernel HTTP 4xx/5xx response makes the CLI exit
+non-zero. Takosumi Accounts does not yet define a post-deploy ready/failed
+callback in this package.
 
 AppBinding records created at this step intentionally carry pending `configRef`
 values:
@@ -105,10 +123,10 @@ Existing manifest imports with the same alias must match the `app.yml`
 declaration exactly. Conflicts fail before any Accounts or kernel request is
 made.
 
-`takosumi-git push` and webhook dispatches from `takosumi-git serve` also read
-`.takosumi/app.yml` when it exists. If service imports are present and the
-manifest does not already declare `serviceResolvers[]`, the operator must inject
-an anchor resolver:
+`takosumi-git install apply`, `takosumi-git push`, and webhook dispatches from
+`takosumi-git serve` also read `.takosumi/app.yml` when it exists. If service
+imports are present and the manifest does not already declare
+`serviceResolvers[]`, the operator must inject an anchor resolver:
 
 ```bash
 takosumi-git push \
@@ -128,5 +146,5 @@ was resolved externally, pass it with `--source-commit`. If neither
 `install apply` refuses to create the AppInstallation.
 
 This keeps the ledger explainable: the app manifest digest, compiled manifest
-digest, git ref, and concrete source commit are recorded together before any
+digest, git ref, and concrete source commit are recorded before the optional
 runtime deployment step.

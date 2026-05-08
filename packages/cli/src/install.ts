@@ -1983,6 +1983,10 @@ export async function runInstallCli(args: readonly string[]): Promise<number> {
       ? renderApplyResult(result as InstallApplyResult)
       : renderHumanPreview(result as InstallPreview);
     Deno.stdout.writeSync(new TextEncoder().encode(text));
+    if (parsed.subcommand === "apply") {
+      const deployment = (result as InstallApplyResult).deployment;
+      if (deployment && deployment.status >= 400) return 1;
+    }
     return 0;
   } catch (error) {
     Deno.stderr.writeSync(
@@ -2007,6 +2011,9 @@ function renderApplyResult(result: InstallApplyResult): string {
     `app: ${result.preview.app.name} (${result.preview.app.id})`,
     `installation: ${installationId}`,
     `accounts response: HTTP ${result.response.status}`,
+    ...(result.deployment
+      ? [`kernel response: HTTP ${result.deployment.status}`]
+      : []),
     "",
   ].join("\n");
 }

@@ -5,6 +5,7 @@ const root = new URL("../", import.meta.url);
 Deno.test("install docs cover preview, apply, and commit pins", async () => {
   const doc = await read("docs/install.md");
   const installSource = await read("packages/cli/src/install.ts");
+  const deployClientSource = await read("packages/deploy-client/src/mod.ts");
   const initSource = await read("packages/cli/src/init.ts");
   const mainSource = await read("packages/cli/src/main.ts");
   const agents = await read("AGENTS.md");
@@ -16,11 +17,16 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "takosumi-git.install-preview@v1",
       "takosumi-git install apply",
       "POST /v1/installations",
+      "POST /v1/deployments",
       "--source-commit",
+      "--endpoint",
+      "--deploy-token",
       "takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>",
       "service.import@v1",
       "--service-resolver-url",
       "TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY",
+      "A kernel HTTP 4xx/5xx response makes the CLI exit",
+      "non-zero",
       "Preview is non-mutating",
     ]
   ) {
@@ -46,6 +52,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       `install source missing ${snippet}`,
     );
   }
+
+  assert.ok(deployClientSource.includes("/v1/deployments"));
 
   assert.ok(mainSource.includes("install     Preview or install"));
   assert.ok(mainSource.includes("--source-commit <sha>"));
