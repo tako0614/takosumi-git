@@ -50,6 +50,11 @@ import {
   type StepExecutor,
   type StepOutcome,
 } from "@takos/takosumi-git-workflow-runner";
+import {
+  compileInstallManifest,
+  type KernelManifestServiceImport,
+  parseInstallableAppYaml,
+} from "./install.ts";
 
 export interface PushOptions {
   readonly endpoint: string;
@@ -59,6 +64,7 @@ export interface PushOptions {
   readonly mode: DeployMode;
   readonly dryRun: boolean;
   readonly artifactContract?: ArtifactContract;
+  readonly serviceResolvers?: readonly ServiceResolverConfig[];
   readonly event?: WorkflowEvent;
   /** Injected for tests. Defaults to global `fetch`. */
   readonly fetch?: typeof fetch;
@@ -74,12 +80,19 @@ export interface PushOptions {
   readonly stdout?: (text: string) => void;
 }
 
+export interface ServiceResolverConfig {
+  readonly kind: "anchor";
+  readonly url: string;
+  readonly publicKey: string;
+}
+
 export interface PushResult {
   readonly manifest: Record<string, unknown>;
   readonly resolved: ReadonlyArray<{
     readonly resource: string;
     readonly artifact: ResolvedArtifact;
   }>;
+  readonly serviceImports: ReadonlyArray<KernelManifestServiceImport>;
   readonly provenance?: DeploymentProvenance;
   readonly response?: { status: number; body: unknown };
 }
@@ -321,6 +334,15 @@ async function readYaml<T>(path: string): Promise<T> {
   return parseYaml(text) as T;
 }
 
+async function tryReadText(path: string): Promise<string | undefined> {
+  try {
+    return await Deno.readTextFile(path);
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return undefined;
+    throw error;
+  }
+}
+
 function resolveWorkflowDir(workflowsDir: string): string {
   if (isAbsolute(workflowsDir)) return workflowsDir;
   // Relative paths resolve against cwd, matching how shell users would
@@ -337,12 +359,24 @@ export async function push(options: PushOptions): Promise<PushResult> {
   const artifactContract = options.artifactContract ??
     DEFAULT_ARTIFACT_CONTRACT;
 
-  const manifest = await readYaml<Record<string, unknown>>(manifestPath);
+  const manifestText = await Deno.readTextFile(manifestPath);
+  let manifest = parseYaml(manifestText) as Record<string, unknown>;
   if (!isRecord(manifest)) {
     throw new Error(`manifest at ${manifestPath} is not an object`);
   }
-  const entries = extractResourceEntries(manifest);
   const projectRoot = dirname(dirname(manifestPath)); // parent of `.takosumi/`
+  const appText = await tryReadText(join(projectRoot, ".takosumi", "app.yml"));
+  const compiled = appText
+    ? compileInstallManifest(parseInstallableAppYaml(appText), manifestText)
+    : undefined;
+  if (compiled) manifest = compiled.manifest;
+  const serviceImports = readKernelManifestServiceImports(manifest);
+  applyServiceResolvers({
+    manifest,
+    serviceImportCount: serviceImports.length,
+    serviceResolvers: options.serviceResolvers ?? [],
+  });
+  const entries = extractResourceEntries(manifest);
   const executorFactory = options.executorFactory ??
     ((_dir: string) => defaultStepExecutor(projectRoot));
   const workflowRunId = options.workflowRunIdFactory?.() ??
@@ -467,7 +501,12 @@ export async function push(options: PushOptions): Promise<PushResult> {
       `# takosumi-git push --dry-run\n# resolved ${resolved.length} resource(s)\n`,
     );
     stdout(stringifyYaml(manifest));
-    return { manifest, resolved, ...(provenance ? { provenance } : {}) };
+    return {
+      manifest,
+      resolved,
+      serviceImports,
+      ...(provenance ? { provenance } : {}),
+    };
   }
 
   const response = await postDeployment(
@@ -486,9 +525,60 @@ export async function push(options: PushOptions): Promise<PushResult> {
   return {
     manifest,
     resolved,
+    serviceImports,
     ...(provenance ? { provenance } : {}),
     response,
   };
+}
+
+function readKernelManifestServiceImports(
+  manifest: Record<string, unknown>,
+): readonly KernelManifestServiceImport[] {
+  const imports = manifest.imports;
+  if (imports === undefined) return [];
+  if (!Array.isArray(imports)) {
+    throw new Error("manifest.imports must be an array");
+  }
+  return imports.map((entry, index) => {
+    if (!isRecord(entry)) {
+      throw new Error(`manifest.imports[${index}] must be an object`);
+    }
+    if (typeof entry.alias !== "string" || typeof entry.service !== "string") {
+      throw new Error(
+        `manifest.imports[${index}] must declare alias and service`,
+      );
+    }
+    return {
+      alias: entry.alias,
+      service: entry.service,
+      ...(entry.refreshPolicy !== undefined
+        ? { refreshPolicy: entry.refreshPolicy as Record<string, unknown> }
+        : {}),
+    };
+  });
+}
+
+function applyServiceResolvers(input: {
+  manifest: Record<string, unknown>;
+  serviceImportCount: number;
+  serviceResolvers: readonly ServiceResolverConfig[];
+}): void {
+  if (input.serviceImportCount === 0) return;
+  const existing = input.manifest.serviceResolvers;
+  if (existing !== undefined && !Array.isArray(existing)) {
+    throw new Error("manifest.serviceResolvers must be an array");
+  }
+  if (Array.isArray(existing) && existing.length > 0) return;
+  if (input.serviceResolvers.length === 0) {
+    throw new Error(
+      "service imports require serviceResolvers; pass --service-resolver-url and --service-resolver-public-key",
+    );
+  }
+  input.manifest.serviceResolvers = input.serviceResolvers.map((resolver) => ({
+    kind: resolver.kind,
+    url: resolver.url,
+    publicKey: resolver.publicKey,
+  }));
 }
 
 async function defaultGitRunner(
@@ -625,6 +715,7 @@ export interface ParsedPushArgs {
   readonly mode: DeployMode;
   readonly dryRun: boolean;
   readonly artifactContract: ArtifactContract;
+  readonly serviceResolvers?: readonly ServiceResolverConfig[];
 }
 
 export function parseArtifactContract(raw: unknown): ArtifactContract {
@@ -646,6 +737,8 @@ export function parsePushArgs(
       "workflows-dir",
       "mode",
       "artifact-contract",
+      "service-resolver-url",
+      "service-resolver-public-key",
     ],
     boolean: ["dry-run"],
     alias: {},
@@ -662,6 +755,19 @@ export function parsePushArgs(
   const token = (flags.token as string | undefined) ??
     env.get("TAKOSUMI_TOKEN") ?? "";
   const dryRun = Boolean(flags["dry-run"]);
+  const serviceResolverUrl = (flags["service-resolver-url"] as
+    | string
+    | undefined) ??
+    env.get("TAKOSUMI_SERVICE_RESOLVER_URL");
+  const serviceResolverPublicKey = (flags["service-resolver-public-key"] as
+    | string
+    | undefined) ??
+    env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
+  if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
+    throw new Error(
+      "--service-resolver-url and --service-resolver-public-key must be provided together",
+    );
+  }
   if (!dryRun && !endpoint) {
     throw new Error(
       "missing --endpoint (or TAKOSUMI_ENDPOINT); required unless --dry-run",
@@ -686,6 +792,15 @@ export function parsePushArgs(
     mode,
     dryRun,
     artifactContract: parseArtifactContract(flags["artifact-contract"]),
+    ...(serviceResolverUrl && serviceResolverPublicKey
+      ? {
+        serviceResolvers: [{
+          kind: "anchor" as const,
+          url: serviceResolverUrl,
+          publicKey: serviceResolverPublicKey,
+        }],
+      }
+      : {}),
   };
 }
 

@@ -9,6 +9,7 @@ import { join } from "@std/path";
 import {
   applyInstall,
   buildInstallPreview,
+  compileInstallManifest,
   InstallableAppValidationError,
   InstallApplyError,
   parseInstallableAppYaml,
@@ -82,6 +83,21 @@ const PINNED_APP_YML = VALID_APP_YML.replace(
   "ref: v1.2.3\n  commit: 0123456789abcdef0123456789abcdef01234567",
 );
 
+const SERVICE_IMPORT_APP_YML = VALID_APP_YML.replace(
+  "install:\n",
+  `  account-auth:
+    type: service.import@v1
+    service: takosumi.account.auth@v1
+    alias: account-auth
+    endpointRoles:
+      - oidc-issuer
+      - install-launch
+    refreshPolicy:
+      kind: ttl
+      ttl: 300s
+install:\n`,
+);
+
 Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   const app = parseInstallableAppYaml(VALID_APP_YML);
 
@@ -134,6 +150,51 @@ install:\n`,
     endpointRoles: ["oidc-issuer", "install-launch"],
     refreshPolicy: { kind: "ttl", ttl: "300s" },
   });
+  const preview = buildInstallPreview(app);
+  assertEquals(preview.serviceImports, [{
+    binding: "account-auth",
+    alias: "account-auth",
+    service: "takosumi.account.auth@v1",
+    endpointRoles: ["oidc-issuer", "install-launch"],
+    refreshPolicy: { kind: "ttl", ttl: "300s" },
+  }]);
+});
+
+Deno.test("compileInstallManifest injects service imports from app bindings", () => {
+  const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
+  const compiled = compileInstallManifest(app, MANIFEST_YML);
+
+  assert(compiled.digest.startsWith("sha256:"));
+  assertEquals(compiled.serviceImports, [{
+    alias: "account-auth",
+    service: "takosumi.account.auth@v1",
+    refreshPolicy: { kind: "ttl", ttl: "300s" },
+  }]);
+  assertEquals(compiled.manifest.imports, [{
+    alias: "account-auth",
+    service: "takosumi.account.auth@v1",
+    refreshPolicy: { kind: "ttl", ttl: "300s" },
+  }]);
+});
+
+Deno.test("compileInstallManifest rejects conflicting manifest imports", () => {
+  const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
+
+  assertThrows(
+    () =>
+      compileInstallManifest(
+        app,
+        MANIFEST_YML.replace(
+          "resources: []",
+          `imports:
+  - alias: account-auth
+    service: takosumi.account.billing@v1
+resources: []`,
+        ),
+      ),
+    Error,
+    "conflicts with app.yml binding",
+  );
 });
 
 Deno.test("parseInstallableAppYaml rejects unknown fields and mutable refs", () => {
@@ -379,7 +440,65 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
       "takosumi-git://installable-app/example.hello/bindings/auth/sha256:",
     );
     assertEquals(body.bindings[0].secretRefs, []);
+    assertEquals(body.serviceImports, []);
     assertEquals(body.grants.length, 2);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall posts service import materialization plan", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      SERVICE_IMPORT_APP_YML.replace(
+        "ref: v1.2.3",
+        "ref: v1.2.3\n  commit: 0123456789abcdef0123456789abcdef01234567",
+      ),
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+
+    const result = await applyInstall({
+      subcommand: "apply",
+      cwd: root,
+      appPath: join(root, ".takosumi", "app.yml"),
+      json: true,
+      accountsUrl: "http://accounts.example/",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1" },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(
+      result.preview.serviceImports[0].service,
+      "takosumi.account.auth@v1",
+    );
+    const body = await requests[0].json();
+    assertEquals(body.serviceImports, [{
+      binding: "account-auth",
+      alias: "account-auth",
+      service: "takosumi.account.auth@v1",
+      endpointRoles: ["oidc-issuer", "install-launch"],
+      refreshPolicy: { kind: "ttl", ttl: "300s" },
+    }]);
+    assertEquals(
+      body.bindings.some((binding: { kind: string }) =>
+        binding.kind === "service.import@v1"
+      ),
+      true,
+    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }

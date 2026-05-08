@@ -40,6 +40,8 @@ The preview response is `takosumi-git.install-preview@v1` and includes:
 - source git URL, ref, optional commit, and manifest digests
 - runtime modes
 - requested binding kinds
+- requested service imports with service identifier, alias, endpoint roles, and
+  refresh policy
 - requested AppGrant capabilities
 - permission digest
 - compatibility warnings
@@ -70,8 +72,9 @@ POST /v1/installations
 
 The request carries the AppInstallation source pin, `appManifestDigest`,
 `compiledManifestDigest` when `.takosumi/manifest.yml` is present, AppBinding
-records derived from `app.yml` binding declarations, and AppGrant records
-derived from `permissions.requested`.
+records derived from `app.yml` binding declarations, service import requests
+derived from `service.import@v1`, and AppGrant records derived from
+`permissions.requested`.
 
 AppBinding records created at this step intentionally carry pending `configRef`
 values:
@@ -83,6 +86,34 @@ takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>
 Those refs identify the approved binding declaration. Later binding resolution
 and secret provisioning can replace them with provider-specific config and
 secret refs without changing the original approval evidence.
+
+## Service Imports
+
+`service.import@v1` bindings are the installer-facing vocabulary for external
+Takosumi services such as `takosumi.account.auth@v1`. Preview surfaces the
+binding name, alias, service identifier, requested endpoint roles, and refresh
+policy so approval is explicit.
+
+When a kernel manifest is present, takosumi-git compiles the app metadata into
+the manifest by merging service import bindings into top-level `imports[]`.
+Existing manifest imports with the same alias must match the `app.yml`
+declaration exactly. Conflicts fail before any Accounts or kernel request is
+made.
+
+`takosumi-git push` and webhook dispatches from `takosumi-git serve` also read
+`.takosumi/app.yml` when it exists. If service imports are present and the
+manifest does not already declare `serviceResolvers[]`, the operator must inject
+an anchor resolver:
+
+```bash
+takosumi-git push \
+  --service-resolver-url https://anchor.example.test/v1/services \
+  --service-resolver-public-key "$TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY"
+```
+
+The same values can be supplied through `TAKOSUMI_SERVICE_RESOLVER_URL` and
+`TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY`. The kernel receives only the compiled
+manifest; `.takosumi/app.yml` itself remains installer metadata.
 
 ## Commit Pins
 

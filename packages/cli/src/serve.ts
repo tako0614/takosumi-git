@@ -8,9 +8,15 @@
 import { parseArgs } from "@std/cli/parse-args";
 import type { WorkflowEvent } from "@takos/takosumi-git-workflow-contract";
 import { eventFromGitPush } from "@takos/takosumi-git-source";
-import { type ArtifactContract, parseArtifactContract, push } from "./push.ts";
+import {
+  type ArtifactContract,
+  parseArtifactContract,
+  push,
+  type ServiceResolverConfig,
+} from "./push.ts";
 import {
   buildInstallPreview,
+  compileInstallManifest,
   digestText,
   InstallableAppValidationError,
   parseInstallableAppObject,
@@ -28,6 +34,7 @@ export interface ServeOptions {
   readonly workflowsDir: string;
   readonly webhookSecret: string;
   readonly artifactContract: ArtifactContract;
+  readonly serviceResolvers?: readonly ServiceResolverConfig[];
   readonly rateLimit: number;
   readonly rateLimitWindowMs: number;
   readonly waitForDispatch?: boolean;
@@ -349,7 +356,10 @@ async function handleInstallPreviewRequest(
     const preview = buildInstallPreview(app, {
       ...(appYaml ? { appManifestDigest: digestText(appYaml) } : {}),
       ...(manifestYaml
-        ? { compiledManifestDigest: digestText(manifestYaml) }
+        ? {
+          compiledManifestDigest: compileInstallManifest(app, manifestYaml)
+            .digest,
+        }
         : {}),
     });
     return json(preview as unknown as Record<string, unknown>, 200);
@@ -374,6 +384,7 @@ function defaultDispatch(options: ServeOptions): WebhookDispatch {
       mode: "apply",
       dryRun: false,
       artifactContract: options.artifactContract,
+      serviceResolvers: options.serviceResolvers,
       event: job.event,
     });
   };
@@ -401,6 +412,8 @@ export function parseServeArgs(
       "workflows-dir",
       "webhook-secret",
       "artifact-contract",
+      "service-resolver-url",
+      "service-resolver-public-key",
       "rate-limit",
       "rate-limit-window-ms",
     ],
@@ -420,6 +433,19 @@ export function parseServeArgs(
     env.get("TAKOSUMI_TOKEN") ?? "";
   const webhookSecret = (flags["webhook-secret"] as string | undefined) ??
     env.get("TAKOSUMI_GIT_WEBHOOK_SECRET") ?? "";
+  const serviceResolverUrl = (flags["service-resolver-url"] as
+    | string
+    | undefined) ??
+    env.get("TAKOSUMI_SERVICE_RESOLVER_URL");
+  const serviceResolverPublicKey = (flags["service-resolver-public-key"] as
+    | string
+    | undefined) ??
+    env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
+  if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
+    throw new Error(
+      "--service-resolver-url and --service-resolver-public-key must be provided together",
+    );
+  }
   if (!endpoint) throw new Error("missing --endpoint (or TAKOSUMI_ENDPOINT)");
   if (!token) throw new Error("missing --token (or TAKOSUMI_TOKEN)");
   if (!webhookSecret) {
@@ -436,6 +462,15 @@ export function parseServeArgs(
     workflowsDir: flags["workflows-dir"] as string,
     webhookSecret,
     artifactContract: parseArtifactContract(flags["artifact-contract"]),
+    ...(serviceResolverUrl && serviceResolverPublicKey
+      ? {
+        serviceResolvers: [{
+          kind: "anchor" as const,
+          url: serviceResolverUrl,
+          publicKey: serviceResolverPublicKey,
+        }],
+      }
+      : {}),
     rateLimit: parsePositiveInt(flags["rate-limit"], "--rate-limit"),
     rateLimitWindowMs: parsePositiveInt(
       flags["rate-limit-window-ms"],

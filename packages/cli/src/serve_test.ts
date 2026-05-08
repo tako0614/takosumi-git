@@ -237,6 +237,9 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
         TAKOSUMI_ENDPOINT: "https://kernel.example",
         TAKOSUMI_TOKEN: "token",
         TAKOSUMI_GIT_WEBHOOK_SECRET: "secret",
+        TAKOSUMI_SERVICE_RESOLVER_URL:
+          "https://anchor.example.test/v1/services",
+        TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY: "pubkey",
       };
       return env[key];
     },
@@ -247,4 +250,9 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
   assertEquals(parsed.token, "token");
   assertEquals(parsed.webhookSecret, "secret");
   assertEquals(parsed.artifactContract, "v1");
+  assertEquals(parsed.serviceResolvers, [{
+    kind: "anchor",
+    url: "https://anchor.example.test/v1/services",
+    publicKey: "pubkey",
+  }]);
 });

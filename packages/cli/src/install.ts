@@ -151,6 +151,7 @@ export interface InstallPreview {
     readonly required: boolean;
     readonly redirectPaths?: readonly string[];
   }[];
+  readonly serviceImports: readonly InstallServiceImportPreview[];
   readonly permissions: {
     readonly requested: readonly InstallableAppPermission[];
   };
@@ -164,6 +165,26 @@ export interface InstallPreview {
     readonly requirements: Record<string, string>;
     readonly warnings: readonly string[];
   };
+}
+
+export interface InstallServiceImportPreview {
+  readonly binding: string;
+  readonly alias: string;
+  readonly service: string;
+  readonly endpointRoles: readonly string[];
+  readonly refreshPolicy?: Record<string, unknown>;
+}
+
+export interface KernelManifestServiceImport {
+  readonly alias: string;
+  readonly service: string;
+  readonly refreshPolicy?: Record<string, unknown>;
+}
+
+export interface CompiledInstallManifest {
+  readonly manifest: Record<string, unknown>;
+  readonly digest: `sha256:${string}`;
+  readonly serviceImports: readonly KernelManifestServiceImport[];
 }
 
 export interface InstallableAppValidationIssue {
@@ -1138,6 +1159,7 @@ export function buildInstallPreview(
     required: binding.required,
     ...(binding.redirectPaths ? { redirectPaths: binding.redirectPaths } : {}),
   })).sort((a, b) => a.name.localeCompare(b.name));
+  const serviceImports = buildInstallServiceImportPreview(app);
   const meteredBindingCount =
     bindings.filter((binding) =>
       binding.type === "database.postgres@v1" ||
@@ -1183,6 +1205,7 @@ export function buildInstallPreview(
     },
     runtime: { modes: app.runtime.modes },
     bindings,
+    serviceImports,
     permissions: { requested: app.permissions.requested },
     permissionDigest,
     cost: {
@@ -1231,6 +1254,16 @@ function renderHumanPreview(preview: InstallPreview): string {
   if (preview.source.appManifestDigest) {
     lines.push(`app manifest: ${preview.source.appManifestDigest}`);
   }
+  if (preview.serviceImports.length > 0) {
+    lines.push("service imports:");
+    for (const serviceImport of preview.serviceImports) {
+      lines.push(
+        `  - ${serviceImport.alias}: ${serviceImport.service} roles=${
+          serviceImport.endpointRoles.join(",")
+        }`,
+      );
+    }
+  }
   if (preview.compatibility.warnings.length > 0) {
     lines.push("warnings:");
     for (const warning of preview.compatibility.warnings) {
@@ -1238,6 +1271,99 @@ function renderHumanPreview(preview: InstallPreview): string {
     }
   }
   return `${lines.join("\n")}\n`;
+}
+
+export function buildInstallServiceImportPreview(
+  app: InstallableApp,
+): readonly InstallServiceImportPreview[] {
+  return Object.entries(app.bindings)
+    .filter((entry): entry is [string, InstallableAppBinding] =>
+      entry[1].type === "service.import@v1"
+    )
+    .map(([name, binding]) => ({
+      binding: name,
+      alias: binding.alias ?? name,
+      service: binding.service ?? "",
+      endpointRoles: binding.endpointRoles ?? [],
+      ...(binding.refreshPolicy
+        ? { refreshPolicy: binding.refreshPolicy }
+        : {}),
+    }))
+    .sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+export function buildKernelServiceImports(
+  app: InstallableApp,
+): readonly KernelManifestServiceImport[] {
+  return buildInstallServiceImportPreview(app).map((entry) => ({
+    alias: entry.alias,
+    service: entry.service,
+    ...(entry.refreshPolicy ? { refreshPolicy: entry.refreshPolicy } : {}),
+  }));
+}
+
+export function compileInstallManifest(
+  app: InstallableApp,
+  manifestText: string,
+): CompiledInstallManifest {
+  const parsed = parseYaml(manifestText);
+  if (!isRecord(parsed)) {
+    throw new Error("entry manifest must be a YAML object");
+  }
+  const serviceImports = buildKernelServiceImports(app);
+  const manifest = mergeKernelServiceImports(parsed, serviceImports);
+  return {
+    manifest,
+    digest: digestJson(manifest),
+    serviceImports,
+  };
+}
+
+function mergeKernelServiceImports(
+  manifest: Record<string, unknown>,
+  serviceImports: readonly KernelManifestServiceImport[],
+): Record<string, unknown> {
+  if (serviceImports.length === 0) return manifest;
+  const existingRaw = manifest.imports;
+  if (existingRaw !== undefined && !Array.isArray(existingRaw)) {
+    throw new Error("entry manifest imports must be an array");
+  }
+  const imports = existingRaw === undefined
+    ? []
+    : existingRaw.map((entry, index) => {
+      if (!isRecord(entry)) {
+        throw new Error(`entry manifest imports[${index}] must be an object`);
+      }
+      return entry;
+    });
+  const importsByAlias = new Map<string, Record<string, unknown>>();
+  for (const entry of imports) {
+    if (typeof entry.alias === "string") importsByAlias.set(entry.alias, entry);
+  }
+  const merged = [...imports];
+  for (const serviceImport of serviceImports) {
+    const existing = importsByAlias.get(serviceImport.alias);
+    if (existing) {
+      if (
+        existing.service !== serviceImport.service ||
+        digestJson(existing.refreshPolicy ?? {}) !==
+          digestJson(serviceImport.refreshPolicy ?? {})
+      ) {
+        throw new Error(
+          `entry manifest imports.${serviceImport.alias} conflicts with app.yml binding`,
+        );
+      }
+      continue;
+    }
+    merged.push({
+      alias: serviceImport.alias,
+      service: serviceImport.service,
+      ...(serviceImport.refreshPolicy
+        ? { refreshPolicy: serviceImport.refreshPolicy }
+        : {}),
+    });
+  }
+  return { ...manifest, imports: merged };
 }
 
 async function tryRead(path: string): Promise<string | undefined> {
@@ -1408,6 +1534,9 @@ async function loadInstallContext(
       ? app.entry.manifest
       : join(repoRoot, app.entry.manifest));
   const manifestText = await tryRead(manifestPath);
+  const compiledManifest = manifestText
+    ? compileInstallManifest(app, manifestText)
+    : undefined;
   const warnings = manifestText
     ? []
     : [`entry manifest not found at ${manifestPath}`];
@@ -1415,8 +1544,8 @@ async function loadInstallContext(
     app,
     preview: buildInstallPreview(app, {
       appManifestDigest: digestText(appText),
-      ...(manifestText
-        ? { compiledManifestDigest: digestText(manifestText) }
+      ...(compiledManifest
+        ? { compiledManifestDigest: compiledManifest.digest }
         : {}),
       compatibilityWarnings: warnings,
     }),
@@ -1489,6 +1618,7 @@ export async function applyInstall(
     },
     mode,
     createdBySubject: options.createdBySubject,
+    serviceImports: buildInstallServiceImportPreview(app),
     bindings: appBindingCreateRequests(app),
     grants: app.permissions.requested.map((capability) => ({
       capability,

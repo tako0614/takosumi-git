@@ -18,6 +18,9 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "POST /v1/installations",
       "--source-commit",
       "takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>",
+      "service.import@v1",
+      "--service-resolver-url",
+      "TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY",
       "Preview is non-mutating",
     ]
   ) {
@@ -30,6 +33,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "buildInstallPreview",
       "applyInstall",
       "appBindingCreateRequests",
+      "compileInstallManifest",
+      "buildKernelServiceImports",
       "source.commit is required for install apply",
       "POST",
       "/v1/installations",

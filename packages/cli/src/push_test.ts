@@ -12,6 +12,7 @@ interface Project {
 async function makeProject(opts: {
   manifest: unknown;
   workflows: Record<string, unknown>;
+  appYml?: string;
 }): Promise<Project> {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-push-" });
   const takosumiDir = join(root, ".takosumi");
@@ -21,6 +22,9 @@ async function makeProject(opts: {
     join(takosumiDir, "manifest.yml"),
     stringifyYaml(opts.manifest as Record<string, unknown>),
   );
+  if (opts.appYml) {
+    await Deno.writeTextFile(join(takosumiDir, "app.yml"), opts.appYml);
+  }
   for (const [name, body] of Object.entries(opts.workflows)) {
     await Deno.writeTextFile(
       join(workflowsDir, name),
@@ -67,6 +71,38 @@ const fakeGit: GitRunner = (args) => {
   }
   return Promise.resolve({ code: 1, stdout: "" });
 };
+
+const SERVICE_IMPORT_APP_YML = `apiVersion: app.takosumi.dev/v1
+kind: InstallableApp
+metadata:
+  id: example.hello
+  name: Hello
+  description: Minimal example app
+  publisher: example
+  homepage: https://example.com
+source:
+  git: https://github.com/example/hello
+  ref: v1.2.3
+entry:
+  manifest: .takosumi/manifest.yml
+runtime:
+  modes:
+    - shared-cell
+bindings:
+  account-auth:
+    type: service.import@v1
+    service: takosumi.account.auth@v1
+    endpointRoles:
+      - oidc-issuer
+    refreshPolicy:
+      kind: ttl
+      ttl: 300s
+install:
+  healthcheckPath: /health
+  postInstallLaunchPath: /_takosumi/launch
+permissions:
+  requested: []
+`;
 
 Deno.test("push --dry-run resolves workflowRef into spec.image and strips workflowRef", async () => {
   const project = await makeProject({
@@ -276,6 +312,130 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
   }
 });
 
+Deno.test("push injects app.yml service imports and operator service resolver", async () => {
+  const project = await makeProject({
+    appYml: SERVICE_IMPORT_APP_YML,
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      metadata: { name: "demo" },
+      resources: [],
+    },
+    workflows: {},
+  });
+
+  try {
+    const result = await push({
+      endpoint: "http://nope",
+      token: "x",
+      manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+      workflowsDir: join(project.root, ".takosumi", "workflows"),
+      mode: "apply",
+      dryRun: true,
+      serviceResolvers: [{
+        kind: "anchor",
+        url: "https://anchor.example.test/v1/services",
+        publicKey: "pubkey",
+      }],
+      stdout: () => {},
+    });
+
+    assertEquals(result.serviceImports, [{
+      alias: "account-auth",
+      service: "takosumi.account.auth@v1",
+      refreshPolicy: { kind: "ttl", ttl: "300s" },
+    }]);
+    assertEquals(result.manifest.imports, [{
+      alias: "account-auth",
+      service: "takosumi.account.auth@v1",
+      refreshPolicy: { kind: "ttl", ttl: "300s" },
+    }]);
+    assertEquals(result.manifest.serviceResolvers, [{
+      kind: "anchor",
+      url: "https://anchor.example.test/v1/services",
+      publicKey: "pubkey",
+    }]);
+  } finally {
+    await project.cleanup();
+  }
+});
+
+Deno.test("push injects operator resolver for direct manifest imports", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      metadata: { name: "demo" },
+      imports: [{
+        alias: "account-auth",
+        service: "takosumi.account.auth@v1",
+      }],
+      resources: [],
+    },
+    workflows: {},
+  });
+
+  try {
+    const result = await push({
+      endpoint: "http://nope",
+      token: "x",
+      manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+      workflowsDir: join(project.root, ".takosumi", "workflows"),
+      mode: "apply",
+      dryRun: true,
+      serviceResolvers: [{
+        kind: "anchor",
+        url: "https://anchor.example.test/v1/services",
+        publicKey: "pubkey",
+      }],
+      stdout: () => {},
+    });
+
+    assertEquals(result.serviceImports, [{
+      alias: "account-auth",
+      service: "takosumi.account.auth@v1",
+    }]);
+    assertEquals(result.manifest.serviceResolvers, [{
+      kind: "anchor",
+      url: "https://anchor.example.test/v1/services",
+      publicKey: "pubkey",
+    }]);
+  } finally {
+    await project.cleanup();
+  }
+});
+
+Deno.test("push requires service resolver config when app.yml imports services", async () => {
+  const project = await makeProject({
+    appYml: SERVICE_IMPORT_APP_YML,
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      resources: [],
+    },
+    workflows: {},
+  });
+
+  try {
+    await assertRejects(
+      () =>
+        push({
+          endpoint: "http://nope",
+          token: "x",
+          manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+          workflowsDir: join(project.root, ".takosumi", "workflows"),
+          mode: "apply",
+          dryRun: true,
+          stdout: () => {},
+        }),
+      Error,
+      "service imports require serviceResolvers",
+    );
+  } finally {
+    await project.cleanup();
+  }
+});
+
 Deno.test("push surfaces non-zero step exit as error", async () => {
   const project = await makeProject({
     manifest: {
@@ -414,6 +574,23 @@ Deno.test("push defaults artifact contract to v1 marker detection", () => {
     get: () => undefined,
   });
   assertEquals(auto.artifactContract, "auto");
+});
+
+Deno.test("push parses service resolver options from environment", () => {
+  const parsed = parsePushArgs(["--dry-run"], {
+    get: (key) =>
+      ({
+        TAKOSUMI_SERVICE_RESOLVER_URL:
+          "https://anchor.example.test/v1/services",
+        TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY: "pubkey",
+      })[key],
+  });
+
+  assertEquals(parsed.serviceResolvers, [{
+    kind: "anchor",
+    url: "https://anchor.example.test/v1/services",
+    publicKey: "pubkey",
+  }]);
 });
 
 Deno.test("push rejects v1 workflows that only emit legacy stdout artifacts", async () => {
