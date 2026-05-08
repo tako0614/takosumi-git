@@ -9,6 +9,13 @@ import { parseArgs } from "@std/cli/parse-args";
 import type { WorkflowEvent } from "@takos/takosumi-git-workflow-contract";
 import { eventFromGitPush } from "@takos/takosumi-git-source";
 import { type ArtifactContract, parseArtifactContract, push } from "./push.ts";
+import {
+  buildInstallPreview,
+  digestText,
+  InstallableAppValidationError,
+  parseInstallableAppObject,
+  parseInstallableAppYaml,
+} from "./install.ts";
 
 export type WebhookProvider = "github" | "gitlab" | "gitea";
 
@@ -262,6 +269,12 @@ export function createServeHandler(
     if (request.method === "GET" && url.pathname === "/health") {
       return json({ ok: true, service: "takosumi-git-serve" }, 200);
     }
+    if (request.method === "POST" && url.pathname === "/v1/install/preview") {
+      if (!limiter.allow(rateLimitKey(request))) {
+        return json({ error: "rate_limited" }, 429);
+      }
+      return await handleInstallPreviewRequest(request);
+    }
     if (request.method !== "POST") return json({ error: "not_found" }, 404);
     const provider = providerFromPath(url.pathname);
     if (!provider) return json({ error: "not_found" }, 404);
@@ -306,6 +319,49 @@ export function createServeHandler(
     }
     return json({ ok: true, queued: true, duplicate: false }, 202);
   };
+}
+
+async function handleInstallPreviewRequest(
+  request: Request,
+): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  if (!isRecord(body)) return json({ error: "invalid_json" }, 400);
+
+  try {
+    const appYaml = typeof body.appYml === "string"
+      ? body.appYml
+      : typeof body.app_yml === "string"
+      ? body.app_yml
+      : undefined;
+    const app = appYaml
+      ? parseInstallableAppYaml(appYaml)
+      : parseInstallableAppObject(body.app);
+    const manifestYaml = typeof body.manifestYml === "string"
+      ? body.manifestYml
+      : typeof body.manifest_yml === "string"
+      ? body.manifest_yml
+      : undefined;
+    const preview = buildInstallPreview(app, {
+      ...(appYaml ? { appManifestDigest: digestText(appYaml) } : {}),
+      ...(manifestYaml
+        ? { compiledManifestDigest: digestText(manifestYaml) }
+        : {}),
+    });
+    return json(preview as unknown as Record<string, unknown>, 200);
+  } catch (error) {
+    if (error instanceof InstallableAppValidationError) {
+      return json({
+        error: "invalid_installable_app",
+        issues: error.issues,
+      }, 400);
+    }
+    return json({ error: "invalid_install_preview_request" }, 400);
+  }
 }
 
 function defaultDispatch(options: ServeOptions): WebhookDispatch {

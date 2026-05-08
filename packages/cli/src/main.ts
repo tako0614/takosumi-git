@@ -12,6 +12,7 @@ import { runPushCli } from "./push.ts";
 import { runInitCli } from "./init.ts";
 import { runHistoryCli } from "./history.ts";
 import { runServeCli } from "./serve.ts";
+import { runInstallCli } from "./install.ts";
 
 const VERSION = "0.3.0";
 
@@ -25,6 +26,7 @@ USAGE:
 COMMANDS:
   init        Scaffold .takosumi/manifest.yml and workflows in this repo
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
+  install     Preview or install .takosumi/app.yml InstallableApp metadata
   serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
   help        Show this help
@@ -44,6 +46,13 @@ PUSH OPTIONS:
   --artifact-contract <v0|v1|auto>
                                artifact URI resolver (default v1)
   --dry-run                    run workflows but skip POST; print resolved manifest
+
+INSTALL OPTIONS:
+  preview                      parse .takosumi/app.yml and print install preview
+  --cwd <dir>                  project root (default .)
+  --app <path>                 InstallableApp YAML (default .takosumi/app.yml)
+  --manifest <path>            kernel manifest path override
+  --json                       print preview JSON
 
 HISTORY OPTIONS:
   --cwd <dir>                  git repository root (default .)
@@ -84,6 +93,9 @@ export async function run(args: readonly string[]): Promise<number> {
   }
   if (first === "push") {
     return await runPushCli(rest);
+  }
+  if (first === "install") {
+    return await runInstallCli(rest);
   }
   if (first === "history") {
     return await runHistoryCli(rest);

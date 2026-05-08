@@ -6,6 +6,36 @@ import {
   type WebhookDispatchJob,
 } from "./serve.ts";
 
+const APP_YML = `apiVersion: app.takosumi.dev/v1
+kind: InstallableApp
+metadata:
+  id: example.hello
+  name: Hello
+  description: Minimal example app
+  publisher: example
+  homepage: https://example.com
+source:
+  git: https://github.com/example/hello
+  ref: v1.2.3
+entry:
+  manifest: .takosumi/manifest.yml
+runtime:
+  modes:
+    - shared-cell
+bindings:
+  auth:
+    type: identity.oidc@v1
+    required: true
+    redirectPaths:
+      - /auth/oidc/callback
+install:
+  healthcheckPath: /health
+  postInstallLaunchPath: /_takosumi/launch
+permissions:
+  requested:
+    - logs.read.own
+`;
+
 function baseOptions(dispatches: WebhookDispatchJob[] = []) {
   return {
     host: "127.0.0.1",
@@ -158,6 +188,46 @@ Deno.test("serve rate limits before signature work", async () => {
 
   assertEquals(first.status, 202);
   assertEquals(second.status, 429);
+});
+
+Deno.test("serve exposes non-mutating install preview API", async () => {
+  const dispatches: WebhookDispatchJob[] = [];
+  const handler = createServeHandler(baseOptions(dispatches));
+  const response = await handler(
+    new Request("http://localhost/v1/install/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        appYml: APP_YML,
+        manifestYml: 'apiVersion: "1.0"\nkind: Manifest\nresources: []\n',
+      }),
+    }),
+  );
+
+  assertEquals(response.status, 200);
+  assertEquals(dispatches.length, 0);
+  const body = await response.json();
+  assertEquals(body.kind, "takosumi-git.install-preview@v1");
+  assertEquals(body.app.id, "example.hello");
+  assertEquals(body.source.pinned, true);
+  assertEquals(body.permissions.requested, ["logs.read.own"]);
+});
+
+Deno.test("serve preview API returns validation issues", async () => {
+  const handler = createServeHandler(baseOptions());
+  const response = await handler(
+    new Request("http://localhost/v1/install/preview", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        appYml: APP_YML.replace("ref: v1.2.3", "ref: main"),
+      }),
+    }),
+  );
+
+  assertEquals(response.status, 400);
+  const body = await response.json();
+  assertEquals(body.error, "invalid_installable_app");
 });
 
 Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
