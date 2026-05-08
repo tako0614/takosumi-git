@@ -70,6 +70,7 @@ Project layout:
 ```
 <repo>/
 ├── .takosumi/
+│   ├── app.yml              ← InstallableApp metadata for install preview/apply
 │   ├── manifest.yml         ← deploy intent (the only file submitted to takosumi)
 │   └── workflows/           ← workflow YAML referenced by resources[i].workflowRef
 │       └── *.yml
@@ -86,6 +87,7 @@ Quick start:
 
 ```bash
 takosumi-git init                                              # .takosumi/ を scaffold
+$EDITOR .takosumi/app.yml                                      # install metadata / bindings / permissions を編集
 $EDITOR .takosumi/manifest.yml                                 # resources / image URI policy を編集
 takosumi-git push --endpoint <url> --token <token>             # takosumi に投下
 ```
@@ -98,8 +100,10 @@ convention now lives here exclusively.
 ## 想定 CLI
 
 ```bash
-takosumi-git init [options]           # .takosumi/manifest.yml + workflows/build.yml を scaffold
+takosumi-git init [options]           # .takosumi/app.yml + manifest.yml + workflows/build.yml を scaffold
 takosumi-git push [options]           # repo の .takosumi/manifest.yml + workflow を解決して takosumi に投下
+takosumi-git install preview          # .takosumi/app.yml から install preview を生成
+takosumi-git install apply            # Takosumi Accounts に AppInstallation を作成
 takosumi-git serve --webhook          # git webhook を受け、自動で push 実行 (stub)
 takosumi-git history                  # git history = manifest version 履歴を表示
 ```

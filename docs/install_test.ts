@@ -5,7 +5,9 @@ const root = new URL("../", import.meta.url);
 Deno.test("install docs cover preview, apply, and commit pins", async () => {
   const doc = await read("docs/install.md");
   const installSource = await read("packages/cli/src/install.ts");
+  const initSource = await read("packages/cli/src/init.ts");
   const mainSource = await read("packages/cli/src/main.ts");
+  const agents = await read("AGENTS.md");
 
   for (
     const snippet of [
@@ -42,6 +44,11 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
 
   assert.ok(mainSource.includes("install     Preview or install"));
   assert.ok(mainSource.includes("--source-commit <sha>"));
+  assert.ok(initSource.includes("appSkeleton"));
+  assert.ok(initSource.includes("app.yml"));
+  assert.ok(agents.includes(".takosumi/app.yml"));
+  assert.ok(agents.includes("takosumi-git install preview"));
+  assert.ok(agents.includes("takosumi-git install apply"));
 });
 
 async function read(path: string): Promise<string> {

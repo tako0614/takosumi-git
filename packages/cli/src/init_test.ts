@@ -24,7 +24,7 @@ async function makeTempProject(
   };
 }
 
-Deno.test("init scaffolds .takosumi/manifest.yml and workflows/build.yml", async () => {
+Deno.test("init scaffolds .takosumi/app.yml, manifest.yml, and workflows/build.yml", async () => {
   const project = await makeTempProject();
   try {
     const result = await init({
@@ -35,6 +35,10 @@ Deno.test("init scaffolds .takosumi/manifest.yml and workflows/build.yml", async
     });
 
     assertEquals(
+      result.appPath,
+      join(project.root, ".takosumi", "app.yml"),
+    );
+    assertEquals(
       result.manifestPath,
       join(project.root, ".takosumi", "manifest.yml"),
     );
@@ -43,6 +47,15 @@ Deno.test("init scaffolds .takosumi/manifest.yml and workflows/build.yml", async
       join(project.root, ".takosumi", "workflows", "build.yml"),
     );
     assertEquals(result.overwritten, false);
+
+    const app = await Deno.readTextFile(result.appPath);
+    assertStringIncludes(app, "apiVersion: app.takosumi.dev/v1");
+    assertStringIncludes(app, "kind: InstallableApp");
+    assertStringIncludes(app, "id: example.demo");
+    assertStringIncludes(app, "name: demo");
+    assertStringIncludes(app, "entry:");
+    assertStringIncludes(app, "manifest: .takosumi/manifest.yml");
+    assertStringIncludes(app, "install-launch-token@v1");
 
     const manifest = await Deno.readTextFile(result.manifestPath);
     assertStringIncludes(manifest, 'apiVersion: "1.0"');
@@ -107,8 +120,11 @@ Deno.test("init --force overwrites existing manifest", async () => {
     assertEquals(result.overwritten, true);
 
     const manifest = await Deno.readTextFile(result.manifestPath);
+    const app = await Deno.readTextFile(result.appPath);
     assertStringIncludes(manifest, "name: second");
+    assertStringIncludes(app, "name: second");
     assert(!manifest.includes("name: first"), "old name must be replaced");
+    assert(!app.includes("name: first"), "old app name must be replaced");
   } finally {
     await project.cleanup();
   }
@@ -124,7 +140,9 @@ Deno.test("init --name substitutes metadata.name", async () => {
       stdout: () => {},
     });
     const manifest = await Deno.readTextFile(result.manifestPath);
+    const app = await Deno.readTextFile(result.appPath);
     assertStringIncludes(manifest, "name: my-cool-app");
+    assertStringIncludes(app, "id: example.my-cool-app");
   } finally {
     await project.cleanup();
   }
@@ -195,7 +213,11 @@ Deno.test("init defaults metadata.name to basename of cwd when --name omitted", 
     const manifest = await Deno.readTextFile(
       join(child, ".takosumi", "manifest.yml"),
     );
+    const app = await Deno.readTextFile(
+      join(child, ".takosumi", "app.yml"),
+    );
     assertStringIncludes(manifest, "name: my-project");
+    assertStringIncludes(app, "id: example.my-project");
   } finally {
     await Deno.remove(parent, { recursive: true });
   }

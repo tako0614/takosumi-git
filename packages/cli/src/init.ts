@@ -5,6 +5,7 @@
  *
  *   <cwd>/
  *   └── .takosumi/
+ *       ├── app.yml                (InstallableApp metadata read by takosumi-git)
  *       ├── manifest.yml           (deploy intent, the only file submitted to takosumi)
  *       └── workflows/
  *           └── build.yml          (workflow referenced by resources[i].workflowRef)
@@ -32,9 +33,47 @@ export interface InitOptions {
 }
 
 export interface InitResult {
+  readonly appPath: string;
   readonly manifestPath: string;
   readonly workflowPath: string;
   readonly overwritten: boolean;
+}
+
+export function appSkeleton(name: string): string {
+  const id = installableAppId(name);
+  return `apiVersion: app.takosumi.dev/v1
+kind: InstallableApp
+metadata:
+  id: ${id}
+  name: ${name}
+  description: ${name} installable app
+  publisher: example
+  homepage: https://example.com
+source:
+  git: https://github.com/example/${id.split(".").at(-1)}
+  ref: v0.1.0
+entry:
+  manifest: .takosumi/manifest.yml
+runtime:
+  modes:
+    - shared-cell
+    - dedicated
+bindings:
+  auth:
+    type: identity.oidc@v1
+    required: true
+    redirectPaths:
+      - /auth/oidc/callback
+  bootstrap:
+    type: install-launch-token@v1
+    required: true
+    consumePath: /_takosumi/launch
+install:
+  healthcheckPath: /health
+  postInstallLaunchPath: /_takosumi/launch
+permissions:
+  requested: []
+`;
 }
 
 export function manifestSkeleton(name: string): string {
@@ -99,6 +138,7 @@ export async function init(options: InitOptions): Promise<InitResult> {
   const projectRoot = resolveCwd(options.cwd);
   const takosumiDir = join(projectRoot, ".takosumi");
   const workflowsDir = join(takosumiDir, "workflows");
+  const appPath = join(takosumiDir, "app.yml");
   const manifestPath = join(takosumiDir, "manifest.yml");
   const workflowPath = join(workflowsDir, "build.yml");
 
@@ -106,27 +146,34 @@ export async function init(options: InitOptions): Promise<InitResult> {
     Deno.stdout.writeSync(new TextEncoder().encode(text));
   });
 
-  const manifestExists = await exists(manifestPath);
-  if (manifestExists && !options.force) {
+  const existingPath = await firstExistingPath([
+    appPath,
+    manifestPath,
+    workflowPath,
+  ]);
+  if (existingPath && !options.force) {
     throw new InitRefusedError(
-      `already initialized at ${manifestPath}; pass --force to overwrite`,
+      `already initialized at ${existingPath}; pass --force to overwrite`,
     );
   }
 
   await Deno.mkdir(workflowsDir, { recursive: true });
+  await Deno.writeTextFile(appPath, appSkeleton(options.name));
   await Deno.writeTextFile(manifestPath, manifestSkeleton(options.name));
   await Deno.writeTextFile(workflowPath, workflowSkeleton());
 
+  stdout(`takosumi-git init: wrote ${appPath}\n`);
   stdout(`takosumi-git init: wrote ${manifestPath}\n`);
   stdout(`takosumi-git init: wrote ${workflowPath}\n`);
-  if (manifestExists) {
+  if (existingPath) {
     stdout(`takosumi-git init: overwrote existing files (--force)\n`);
   }
 
   return {
+    appPath,
     manifestPath,
     workflowPath,
-    overwritten: manifestExists,
+    overwritten: !!existingPath,
   };
 }
 
@@ -168,6 +215,23 @@ function defaultName(projectRoot: string): string {
   // a sensible literal.
   const parent = basename(dirname(projectRoot));
   return parent.length > 0 ? parent : "app";
+}
+
+async function firstExistingPath(
+  paths: readonly string[],
+): Promise<string | undefined> {
+  for (const path of paths) {
+    if (await exists(path)) return path;
+  }
+  return undefined;
+}
+
+function installableAppId(name: string): string {
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(
+    /^-+|-+$/g,
+    "",
+  );
+  return `example.${slug || "app"}`;
 }
 
 export async function runInitCli(args: readonly string[]): Promise<number> {

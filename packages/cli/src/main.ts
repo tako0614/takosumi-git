@@ -24,7 +24,7 @@ USAGE:
   takosumi-git <command> [options]
 
 COMMANDS:
-  init        Scaffold .takosumi/manifest.yml and workflows in this repo
+  init        Scaffold .takosumi/app.yml, manifest.yml, and workflows
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
   install     Preview or install .takosumi/app.yml InstallableApp metadata
   serve       Run a webhook receiver that auto-pushes on git events
