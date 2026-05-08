@@ -58,6 +58,7 @@ INSTALL OPTIONS:
   --space-id <id>              target space id for apply
   --subject <tsub_...>         installer subject for apply
   --mode <mode>                shared-cell | dedicated | self-hosted
+  --source-commit <sha>        resolved 40-char source commit pin
   --json                       print preview JSON
 
 HISTORY OPTIONS:

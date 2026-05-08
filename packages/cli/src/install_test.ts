@@ -226,7 +226,13 @@ Deno.test("runInstallCli prints preview JSON", async () => {
 });
 
 Deno.test("parseInstallArgs reads apply options from env", () => {
-  const parsed = parseInstallArgs(["apply", "--mode", "dedicated"], {
+  const parsed = parseInstallArgs([
+    "apply",
+    "--mode",
+    "dedicated",
+    "--source-commit",
+    "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+  ], {
     get(key: string) {
       const env: Record<string, string> = {
         TAKOSUMI_ACCOUNTS_URL: "http://accounts.example",
@@ -246,6 +252,7 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.createdBySubject, "tsub_owner");
   assertEquals(parsed.token, "secret");
   assertEquals(parsed.mode, "dedicated");
+  assertEquals(parsed.sourceCommit, "abcdefabcdefabcdefabcdefabcdefabcdefabcd");
 });
 
 Deno.test("applyInstall posts AppInstallation create request", async () => {
@@ -336,6 +343,42 @@ Deno.test("applyInstall requires a pinned source commit", async () => {
         }),
       Error,
       "source.commit is required",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall accepts resolver-provided source commit", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(join(root, ".takosumi", "app.yml"), VALID_APP_YML);
+
+    await applyInstall({
+      subcommand: "apply",
+      cwd: root,
+      appPath: join(root, ".takosumi", "app.yml"),
+      json: true,
+      accountsUrl: "http://accounts.example",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      sourceCommit: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1" },
+        }, { status: 202 }));
+      },
+    });
+
+    const body = await requests[0].json();
+    assertEquals(body.source.ref, "v1.2.3");
+    assertEquals(
+      body.source.commit,
+      "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
     );
   } finally {
     await Deno.remove(root, { recursive: true });

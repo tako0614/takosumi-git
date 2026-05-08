@@ -1143,6 +1143,7 @@ export interface ParsedInstallArgs {
   readonly spaceId?: string;
   readonly createdBySubject?: string;
   readonly mode?: InstallableAppRuntimeMode;
+  readonly sourceCommit?: string;
 }
 
 export function parseInstallArgs(
@@ -1171,6 +1172,7 @@ export function parseInstallArgs(
       "space-id",
       "subject",
       "mode",
+      "source-commit",
     ],
     boolean: ["json"],
     default: {
@@ -1194,6 +1196,11 @@ export function parseInstallArgs(
     (flags.space as string | undefined) ?? env.get("TAKOS_SPACE_ID");
   const createdBySubject = (flags.subject as string | undefined) ??
     env.get("TAKOSUMI_SUBJECT") ?? env.get("TAKOS_SUBJECT");
+  const sourceCommit = (flags["source-commit"] as string | undefined) ??
+    env.get("TAKOSUMI_SOURCE_COMMIT");
+  if (sourceCommit && !fullCommitPattern.test(sourceCommit)) {
+    throw new Error("--source-commit must be a 40-char SHA");
+  }
   if (subcommand === "apply") {
     if (!accountsUrl) {
       throw new Error("missing --accounts-url (or TAKOSUMI_ACCOUNTS_URL)");
@@ -1222,6 +1229,7 @@ export function parseInstallArgs(
     ...(spaceId ? { spaceId } : {}),
     ...(createdBySubject ? { createdBySubject } : {}),
     ...(mode ? { mode } : {}),
+    ...(sourceCommit ? { sourceCommit } : {}),
   };
 }
 
@@ -1263,6 +1271,7 @@ APPLY OPTIONS:
   --space-id <id>       target space id (or --space / TAKOS_SPACE_ID)
   --subject <tsub_...>  installer subject (or TAKOSUMI_SUBJECT/TAKOS_SUBJECT)
   --mode <mode>         shared-cell | dedicated | self-hosted
+  --source-commit <sha> resolved 40-char source commit pin
 `;
 
 interface InstallContext {
@@ -1340,7 +1349,7 @@ export async function applyInstall(
   if (!app.runtime.modes.includes(mode)) {
     throw new Error(`mode ${mode} is not supported by ${app.metadata.id}`);
   }
-  const sourceCommit = app.source.commit ??
+  const sourceCommit = options.sourceCommit ?? app.source.commit ??
     (fullCommitPattern.test(app.source.ref) ? app.source.ref : undefined);
   if (!sourceCommit) {
     throw new Error(
