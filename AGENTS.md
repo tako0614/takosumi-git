@@ -145,8 +145,8 @@ stdout marker を採用する。v0 の最後の非空 stdout 行 contract は
 現時点では standalone docs site を持たず、`docs/*.md` を GitHub / JSR package
 同梱 Markdown として publish-ready に保つ。最低限の正本 docs は
 `docs/quickstart.md`、`docs/workflow-ref.md`、`docs/artifact-contract.md`、
-`docs/history.md`、`docs/serve.md`。 VitePress 等の docs site 化は JSR publish
-後の follow-up とする。
+`docs/history.md`、`docs/serve.md`、`docs/install.md`。 VitePress 等の docs site
+化は JSR publish 後の follow-up とする。
 
 ## 依存関係
 

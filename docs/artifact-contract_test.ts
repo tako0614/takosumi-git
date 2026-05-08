@@ -54,6 +54,7 @@ Deno.test("artifact contract is linked from top-level docs", async () => {
   assert.ok(agents.includes("docs/quickstart.md"));
   assert.ok(agents.includes("docs/history.md"));
   assert.ok(agents.includes("docs/serve.md"));
+  assert.ok(agents.includes("docs/install.md"));
 });
 
 Deno.test("quickstart and workflow-ref docs pin the project convention", async () => {
