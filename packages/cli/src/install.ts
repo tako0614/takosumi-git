@@ -21,6 +21,7 @@ export const INSTALLABLE_APP_BINDING_TYPES = [
   "domain.http@v1",
   "deploy-intent.gitops@v1",
   "install-launch-token@v1",
+  "service.import@v1",
 ] as const;
 
 export const INSTALLABLE_APP_RUNTIME_MODES = [
@@ -113,6 +114,10 @@ export interface InstallableAppBinding {
   readonly writePathPrefix?: string;
   readonly consumePath?: string;
   readonly maxLifetimeSeconds?: number;
+  readonly service?: string;
+  readonly alias?: string;
+  readonly endpointRoles?: readonly string[];
+  readonly refreshPolicy?: Record<string, unknown>;
 }
 
 export interface InstallPreview {
@@ -184,6 +189,10 @@ const DEFAULT_APP_PATH = ".takosumi/app.yml";
 const reverseDomainPattern = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
 const publisherPattern = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/;
 const bindingNamePattern = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
+const serviceIdentifierPattern =
+  /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*@v\d+(?:-[a-z][a-z0-9-]*)?$/;
+const endpointRolePattern = /^[a-z][a-z0-9-]*$/;
+const ttlDurationPattern = /^\d+[smhd]$/;
 const pathPattern = /^\/[^?#]{0,199}$/;
 const fullCommitPattern = /^[0-9a-f]{40}$/;
 const semverTagPattern = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
@@ -474,9 +483,9 @@ function parseBindings(
     unknownKeys(raw, `bindings.${name}`, allowedKeys, issues);
     const binding: Record<string, unknown> = {
       type,
-      required: booleanField(
+      required: bindingRequired(
+        type as InstallableAppBindingType,
         raw,
-        "required",
         `bindings.${name}.required`,
         issues,
       ),
@@ -522,6 +531,8 @@ function bindingAllowedKeys(
       return [...common, "branch", "writePathPrefix"];
     case "install-launch-token@v1":
       return [...common, "consumePath", "maxLifetimeSeconds"];
+    case "service.import@v1":
+      return [...common, "service", "alias", "endpointRoles", "refreshPolicy"];
   }
 }
 
@@ -723,7 +734,114 @@ function parseBindingSpecificFields(
         });
       } else binding.maxLifetimeSeconds = maxLifetimeSeconds;
     }
+  } else if (type === "service.import@v1") {
+    const service = optionalStringField(
+      raw,
+      "service",
+      `bindings.${name}.service`,
+      issues,
+    );
+    if (!service) {
+      issues.push({
+        path: `bindings.${name}.service`,
+        message: "is required",
+      });
+    } else if (!serviceIdentifierPattern.test(service)) {
+      issues.push({
+        path: `bindings.${name}.service`,
+        message: "must be a forward 3-level service identifier",
+      });
+    } else binding.service = service;
+
+    const alias = optionalStringField(
+      raw,
+      "alias",
+      `bindings.${name}.alias`,
+      issues,
+    );
+    if (alias !== undefined) {
+      if (!bindingNamePattern.test(alias)) {
+        issues.push({
+          path: `bindings.${name}.alias`,
+          message: "must match binding name syntax",
+        });
+      } else binding.alias = alias;
+    }
+
+    const endpointRoles = validateOptionalStringArray(
+      raw.endpointRoles,
+      `bindings.${name}.endpointRoles`,
+      issues,
+    );
+    if (!endpointRoles || endpointRoles.length < 1) {
+      issues.push({
+        path: `bindings.${name}.endpointRoles`,
+        message: "must contain at least one endpoint role",
+      });
+    } else if (endpointRoles.some((role) => !endpointRolePattern.test(role))) {
+      issues.push({
+        path: `bindings.${name}.endpointRoles`,
+        message: "must contain endpoint role identifiers",
+      });
+    } else binding.endpointRoles = endpointRoles;
+
+    const refreshPolicy = validateServiceImportRefreshPolicy(
+      raw.refreshPolicy,
+      `bindings.${name}.refreshPolicy`,
+      issues,
+    );
+    if (refreshPolicy) binding.refreshPolicy = refreshPolicy;
   }
+}
+
+function bindingRequired(
+  type: InstallableAppBindingType,
+  record: Record<string, unknown>,
+  path: string,
+  issues: InstallableAppValidationIssue[],
+): boolean {
+  if (record.required === undefined && type === "service.import@v1") {
+    return true;
+  }
+  return booleanField(record, "required", path, issues);
+}
+
+function validateServiceImportRefreshPolicy(
+  value: unknown,
+  path: string,
+  issues: InstallableAppValidationIssue[],
+): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) {
+    issues.push({ path, message: "must be an object" });
+    return undefined;
+  }
+  unknownKeys(value, path, ["kind", "ttl", "triggers"], issues);
+  if (value.kind === "ttl") {
+    if (typeof value.ttl !== "string" || !ttlDurationPattern.test(value.ttl)) {
+      issues.push({
+        path: `${path}.ttl`,
+        message: "must be a duration such as 300s or 1h",
+      });
+      return undefined;
+    }
+    return { kind: "ttl", ttl: value.ttl };
+  }
+  if (value.kind === "event-driven") {
+    if (!Array.isArray(value.triggers)) {
+      issues.push({
+        path: `${path}.triggers`,
+        message: "must be an array",
+      });
+      return undefined;
+    }
+    return { kind: "event-driven", triggers: value.triggers };
+  }
+  issues.push({
+    path: `${path}.kind`,
+    message: "must be ttl or event-driven",
+  });
+  return undefined;
 }
 
 export function parseInstallableAppObject(input: unknown): InstallableApp {

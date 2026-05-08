@@ -108,6 +108,34 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   assert(preview.permissionDigest.startsWith("sha256:"));
 });
 
+Deno.test("parseInstallableAppYaml accepts service import bindings", () => {
+  const app = parseInstallableAppYaml(
+    VALID_APP_YML.replace(
+      "install:\n",
+      `  account-auth:
+    type: service.import@v1
+    service: takosumi.account.auth@v1
+    alias: account-auth
+    endpointRoles:
+      - oidc-issuer
+      - install-launch
+    refreshPolicy:
+      kind: ttl
+      ttl: 300s
+install:\n`,
+    ),
+  );
+
+  assertEquals(app.bindings["account-auth"], {
+    type: "service.import@v1",
+    required: true,
+    service: "takosumi.account.auth@v1",
+    alias: "account-auth",
+    endpointRoles: ["oidc-issuer", "install-launch"],
+    refreshPolicy: { kind: "ttl", ttl: "300s" },
+  });
+});
+
 Deno.test("parseInstallableAppYaml rejects unknown fields and mutable refs", () => {
   const error = assertThrows(
     () =>
@@ -137,6 +165,40 @@ Deno.test("parseInstallableAppYaml rejects unsupported binding catalog entries",
   assertStringIncludes(
     error.message,
     "bindings.database.type must be one of the v1 binding catalog identifiers",
+  );
+});
+
+Deno.test("parseInstallableAppYaml rejects malformed service import bindings", () => {
+  const error = assertThrows(
+    () =>
+      parseInstallableAppYaml(
+        VALID_APP_YML.replace(
+          "install:\n",
+          `  account-auth:
+    type: service.import@v1
+    service: takosumi.account.auth.oidc@v1
+    endpointRoles:
+      - OIDC
+    refreshPolicy:
+      kind: ttl
+      ttl: five-minutes
+install:\n`,
+        ),
+      ),
+    InstallableAppValidationError,
+  );
+
+  assertStringIncludes(
+    error.message,
+    "bindings.account-auth.service must be a forward 3-level service identifier",
+  );
+  assertStringIncludes(
+    error.message,
+    "bindings.account-auth.endpointRoles must contain endpoint role identifiers",
+  );
+  assertStringIncludes(
+    error.message,
+    "bindings.account-auth.refreshPolicy.ttl must be a duration",
   );
 });
 
