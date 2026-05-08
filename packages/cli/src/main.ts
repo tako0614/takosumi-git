@@ -49,9 +49,15 @@ PUSH OPTIONS:
 
 INSTALL OPTIONS:
   preview                      parse .takosumi/app.yml and print install preview
+  apply                        create an AppInstallation in Takosumi Accounts
   --cwd <dir>                  project root (default .)
   --app <path>                 InstallableApp YAML (default .takosumi/app.yml)
   --manifest <path>            kernel manifest path override
+  --accounts-url <url>         Takosumi Accounts URL for apply
+  --account-id <id>            ledger account id for apply
+  --space-id <id>              target space id for apply
+  --subject <tsub_...>         installer subject for apply
+  --mode <mode>                shared-cell | dedicated | self-hosted
   --json                       print preview JSON
 
 HISTORY OPTIONS:

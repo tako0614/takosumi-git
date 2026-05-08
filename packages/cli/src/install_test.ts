@@ -7,9 +7,12 @@ import {
 } from "@std/assert";
 import { join } from "@std/path";
 import {
+  applyInstall,
   buildInstallPreview,
   InstallableAppValidationError,
+  InstallApplyError,
   parseInstallableAppYaml,
+  parseInstallArgs,
   previewInstall,
   runInstallCli,
 } from "./install.ts";
@@ -73,6 +76,11 @@ metadata:
   name: hello
 resources: []
 `;
+
+const PINNED_APP_YML = VALID_APP_YML.replace(
+  "ref: v1.2.3",
+  "ref: v1.2.3\n  commit: 0123456789abcdef0123456789abcdef01234567",
+);
 
 Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   const app = parseInstallableAppYaml(VALID_APP_YML);
@@ -213,6 +221,138 @@ Deno.test("runInstallCli prints preview JSON", async () => {
       originalStdoutWrite;
     (Deno.stderr as { writeSync: (p: Uint8Array) => number }).writeSync =
       originalStderrWrite;
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("parseInstallArgs reads apply options from env", () => {
+  const parsed = parseInstallArgs(["apply", "--mode", "dedicated"], {
+    get(key: string) {
+      const env: Record<string, string> = {
+        TAKOSUMI_ACCOUNTS_URL: "http://accounts.example",
+        TAKOS_ACCOUNT_ID: "acct_1",
+        TAKOS_SPACE_ID: "space_1",
+        TAKOSUMI_SUBJECT: "tsub_owner",
+        TAKOS_TOKEN: "secret",
+      };
+      return env[key];
+    },
+  });
+
+  assertEquals(parsed.subcommand, "apply");
+  assertEquals(parsed.accountsUrl, "http://accounts.example");
+  assertEquals(parsed.accountId, "acct_1");
+  assertEquals(parsed.spaceId, "space_1");
+  assertEquals(parsed.createdBySubject, "tsub_owner");
+  assertEquals(parsed.token, "secret");
+  assertEquals(parsed.mode, "dedicated");
+});
+
+Deno.test("applyInstall posts AppInstallation create request", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+
+    const result = await applyInstall({
+      subcommand: "apply",
+      cwd: root,
+      appPath: join(root, ".takosumi", "app.yml"),
+      json: true,
+      accountsUrl: "http://accounts.example/",
+      token: "secret",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      mode: "shared-cell",
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1" },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(result.response.status, 202);
+    assertEquals(requests.length, 1);
+    assertEquals(requests[0].url, "http://accounts.example/v1/installations");
+    assertEquals(requests[0].headers.get("authorization"), "Bearer secret");
+    const body = await requests[0].json();
+    assertEquals(body.accountId, "acct_1");
+    assertEquals(body.spaceId, "space_1");
+    assertEquals(body.appId, "example.hello");
+    assertEquals(body.mode, "shared-cell");
+    assertEquals(
+      body.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+    assertEquals(body.grants.length, 2);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall requires a pinned source commit", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(join(root, ".takosumi", "app.yml"), VALID_APP_YML);
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: root,
+          appPath: join(root, ".takosumi", "app.yml"),
+          json: true,
+          accountsUrl: "http://accounts.example",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+        }),
+      Error,
+      "source.commit is required",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall surfaces Accounts errors", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: root,
+          appPath: join(root, ".takosumi", "app.yml"),
+          json: true,
+          accountsUrl: "http://accounts.example",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+          fetch: () =>
+            Promise.resolve(Response.json({ error: "nope" }, { status: 409 })),
+        }),
+      InstallApplyError,
+      "HTTP 409",
+    );
+  } finally {
     await Deno.remove(root, { recursive: true });
   }
 });

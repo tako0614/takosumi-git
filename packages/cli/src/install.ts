@@ -1132,14 +1132,23 @@ async function tryRead(path: string): Promise<string | undefined> {
 }
 
 export interface ParsedInstallArgs {
-  readonly subcommand: "preview";
+  readonly subcommand: "preview" | "apply";
   readonly cwd: string;
   readonly appPath: string;
   readonly manifestPath?: string;
   readonly json: boolean;
+  readonly accountsUrl?: string;
+  readonly token?: string;
+  readonly accountId?: string;
+  readonly spaceId?: string;
+  readonly createdBySubject?: string;
+  readonly mode?: InstallableAppRuntimeMode;
 }
 
-export function parseInstallArgs(args: readonly string[]): ParsedInstallArgs {
+export function parseInstallArgs(
+  args: readonly string[],
+  env: { get(key: string): string | undefined } = Deno.env,
+): ParsedInstallArgs {
   const [subcommand, ...rest] = args;
   if (
     !subcommand || subcommand === "help" || subcommand === "-h" ||
@@ -1147,11 +1156,22 @@ export function parseInstallArgs(args: readonly string[]): ParsedInstallArgs {
   ) {
     throw new InstallHelpRequested();
   }
-  if (subcommand !== "preview") {
+  if (subcommand !== "preview" && subcommand !== "apply") {
     throw new Error(`unknown install command '${subcommand}'`);
   }
   const flags = parseArgs(rest as string[], {
-    string: ["cwd", "app", "manifest"],
+    string: [
+      "cwd",
+      "app",
+      "manifest",
+      "accounts-url",
+      "token",
+      "account-id",
+      "space",
+      "space-id",
+      "subject",
+      "mode",
+    ],
     boolean: ["json"],
     default: {
       cwd: ".",
@@ -1161,15 +1181,60 @@ export function parseInstallArgs(args: readonly string[]): ParsedInstallArgs {
   });
   const cwd = resolve(flags.cwd as string);
   const app = flags.app as string;
+  const mode = flags.mode === undefined
+    ? undefined
+    : parseRuntimeMode(flags.mode);
+  const accountsUrl = (flags["accounts-url"] as string | undefined) ??
+    env.get("TAKOSUMI_ACCOUNTS_URL");
+  const token = (flags.token as string | undefined) ??
+    env.get("TAKOSUMI_ACCOUNTS_TOKEN") ?? env.get("TAKOS_TOKEN");
+  const accountId = (flags["account-id"] as string | undefined) ??
+    env.get("TAKOS_ACCOUNT_ID");
+  const spaceId = (flags["space-id"] as string | undefined) ??
+    (flags.space as string | undefined) ?? env.get("TAKOS_SPACE_ID");
+  const createdBySubject = (flags.subject as string | undefined) ??
+    env.get("TAKOSUMI_SUBJECT") ?? env.get("TAKOS_SUBJECT");
+  if (subcommand === "apply") {
+    if (!accountsUrl) {
+      throw new Error("missing --accounts-url (or TAKOSUMI_ACCOUNTS_URL)");
+    }
+    if (!accountId) {
+      throw new Error("missing --account-id (or TAKOS_ACCOUNT_ID)");
+    }
+    if (!spaceId) {
+      throw new Error("missing --space-id/--space (or TAKOS_SPACE_ID)");
+    }
+    if (!createdBySubject) {
+      throw new Error("missing --subject (or TAKOSUMI_SUBJECT/TAKOS_SUBJECT)");
+    }
+  }
   return {
-    subcommand: "preview",
+    subcommand,
     cwd,
     appPath: isAbsolute(app) ? app : join(cwd, app),
     manifestPath: typeof flags.manifest === "string"
       ? isAbsolute(flags.manifest) ? flags.manifest : join(cwd, flags.manifest)
       : undefined,
     json: Boolean(flags.json),
+    ...(accountsUrl ? { accountsUrl } : {}),
+    ...(token ? { token } : {}),
+    ...(accountId ? { accountId } : {}),
+    ...(spaceId ? { spaceId } : {}),
+    ...(createdBySubject ? { createdBySubject } : {}),
+    ...(mode ? { mode } : {}),
   };
+}
+
+function parseRuntimeMode(value: unknown): InstallableAppRuntimeMode {
+  if (
+    typeof value === "string" &&
+    INSTALLABLE_APP_RUNTIME_MODES.includes(value as InstallableAppRuntimeMode)
+  ) {
+    return value as InstallableAppRuntimeMode;
+  }
+  throw new Error(
+    `--mode must be one of ${INSTALLABLE_APP_RUNTIME_MODES.join("|")}`,
+  );
 }
 
 export class InstallHelpRequested extends Error {
@@ -1183,17 +1248,31 @@ const INSTALL_HELP_TEXT = `takosumi-git install
 
 USAGE:
   takosumi-git install preview [options]
+  takosumi-git install apply [options]
 
 PREVIEW OPTIONS:
   --cwd <dir>        project root (default .)
   --app <path>       InstallableApp YAML (default .takosumi/app.yml)
   --manifest <path>  kernel manifest path override
   --json             print preview JSON
+
+APPLY OPTIONS:
+  --accounts-url <url>  Takosumi Accounts URL (or TAKOSUMI_ACCOUNTS_URL)
+  --token <token>       bearer token (or TAKOSUMI_ACCOUNTS_TOKEN/TAKOS_TOKEN)
+  --account-id <id>     ledger account id (or TAKOS_ACCOUNT_ID)
+  --space-id <id>       target space id (or --space / TAKOS_SPACE_ID)
+  --subject <tsub_...>  installer subject (or TAKOSUMI_SUBJECT/TAKOS_SUBJECT)
+  --mode <mode>         shared-cell | dedicated | self-hosted
 `;
 
-export async function previewInstall(
-  options: ParsedInstallArgs,
-): Promise<InstallPreview> {
+interface InstallContext {
+  readonly app: InstallableApp;
+  readonly preview: InstallPreview;
+}
+
+async function loadInstallContext(
+  options: Pick<ParsedInstallArgs, "cwd" | "appPath" | "manifestPath">,
+): Promise<InstallContext> {
   const appText = await Deno.readTextFile(options.appPath);
   const app = parseInstallableAppYaml(appText);
   const repoRoot = options.cwd || dirname(dirname(options.appPath));
@@ -1205,13 +1284,122 @@ export async function previewInstall(
   const warnings = manifestText
     ? []
     : [`entry manifest not found at ${manifestPath}`];
-  return buildInstallPreview(app, {
-    appManifestDigest: digestText(appText),
-    ...(manifestText
-      ? { compiledManifestDigest: digestText(manifestText) }
-      : {}),
-    compatibilityWarnings: warnings,
-  });
+  return {
+    app,
+    preview: buildInstallPreview(app, {
+      appManifestDigest: digestText(appText),
+      ...(manifestText
+        ? { compiledManifestDigest: digestText(manifestText) }
+        : {}),
+      compatibilityWarnings: warnings,
+    }),
+  };
+}
+
+export async function previewInstall(
+  options: ParsedInstallArgs,
+): Promise<InstallPreview> {
+  return (await loadInstallContext(options)).preview;
+}
+
+export interface InstallApplyResult {
+  readonly preview: InstallPreview;
+  readonly request: Record<string, unknown>;
+  readonly response: {
+    readonly status: number;
+    readonly body: unknown;
+  };
+}
+
+export async function applyInstall(
+  options: ParsedInstallArgs & {
+    readonly subcommand: "apply";
+    readonly accountsUrl: string;
+    readonly accountId: string;
+    readonly spaceId: string;
+    readonly createdBySubject: string;
+    readonly fetch?: typeof fetch;
+  },
+): Promise<InstallApplyResult> {
+  const { app, preview } = await loadInstallContext(options);
+  const mode = options.mode ?? app.runtime.modes[0];
+  if (!app.runtime.modes.includes(mode)) {
+    throw new Error(`mode ${mode} is not supported by ${app.metadata.id}`);
+  }
+  const sourceCommit = app.source.commit ??
+    (fullCommitPattern.test(app.source.ref) ? app.source.ref : undefined);
+  if (!sourceCommit) {
+    throw new Error(
+      "source.commit is required for install apply; pin the ref before creating AppInstallation",
+    );
+  }
+  const request = {
+    accountId: options.accountId,
+    spaceId: options.spaceId,
+    appId: app.metadata.id,
+    source: {
+      gitUrl: app.source.git,
+      ref: app.source.ref,
+      commit: sourceCommit,
+      appManifestDigest: preview.source.appManifestDigest,
+      ...(preview.source.compiledManifestDigest
+        ? { compiledManifestDigest: preview.source.compiledManifestDigest }
+        : {}),
+    },
+    mode,
+    createdBySubject: options.createdBySubject,
+    grants: app.permissions.requested.map((capability) => ({
+      capability,
+      scope: {
+        type: "single-installation",
+        appId: app.metadata.id,
+      },
+    })),
+  };
+  const response = await (options.fetch ?? fetch)(
+    `${normalizeBaseUrl(options.accountsUrl)}/v1/installations`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      },
+      body: JSON.stringify(request),
+    },
+  );
+  const body = await readResponseBody(response);
+  if (response.status >= 400) {
+    throw new InstallApplyError(response.status, body);
+  }
+  return {
+    preview,
+    request,
+    response: {
+      status: response.status,
+      body,
+    },
+  };
+}
+
+export class InstallApplyError extends Error {
+  constructor(readonly status: number, readonly body: unknown) {
+    super(`Takosumi Accounts returned HTTP ${status}`);
+    this.name = "InstallApplyError";
+  }
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, "");
+}
+
+async function readResponseBody(response: Response): Promise<unknown> {
+  const text = await response.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 export async function runInstallCli(args: readonly string[]): Promise<number> {
@@ -1232,10 +1420,22 @@ export async function runInstallCli(args: readonly string[]): Promise<number> {
   }
 
   try {
-    const preview = await previewInstall(parsed);
+    const result = parsed.subcommand === "apply"
+      ? await applyInstall(
+        parsed as ParsedInstallArgs & {
+          readonly subcommand: "apply";
+          readonly accountsUrl: string;
+          readonly accountId: string;
+          readonly spaceId: string;
+          readonly createdBySubject: string;
+        },
+      )
+      : await previewInstall(parsed);
     const text = parsed.json
-      ? `${JSON.stringify(preview, null, 2)}\n`
-      : renderHumanPreview(preview);
+      ? `${JSON.stringify(result, null, 2)}\n`
+      : parsed.subcommand === "apply"
+      ? renderApplyResult(result as InstallApplyResult)
+      : renderHumanPreview(result as InstallPreview);
     Deno.stdout.writeSync(new TextEncoder().encode(text));
     return 0;
   } catch (error) {
@@ -1246,4 +1446,21 @@ export async function runInstallCli(args: readonly string[]): Promise<number> {
     );
     return error instanceof InstallableAppValidationError ? 64 : 1;
   }
+}
+
+function renderApplyResult(result: InstallApplyResult): string {
+  const body = isRecord(result.response.body) ? result.response.body : {};
+  const installation = isRecord(body.installation) ? body.installation : {};
+  const installationId = typeof installation.id === "string"
+    ? installation.id
+    : typeof installation.installation_id === "string"
+    ? installation.installation_id
+    : "(unknown)";
+  return [
+    "takosumi-git install apply",
+    `app: ${result.preview.app.name} (${result.preview.app.id})`,
+    `installation: ${installationId}`,
+    `accounts response: HTTP ${result.response.status}`,
+    "",
+  ].join("\n");
 }
