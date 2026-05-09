@@ -62,7 +62,7 @@ jobs:
         run: |
           docker build -t ghcr.io/example/demo:${GIT_SHA} .
           docker push ghcr.io/example/demo:${GIT_SHA}
-          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/demo@sha256:0123456789abcdef"
+          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/demo@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     artifact:
       name: image
 ```

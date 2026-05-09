@@ -50,17 +50,17 @@ jobs:
         run: |
           docker build -t ghcr.io/example/app:${GIT_SHA} .
           docker push ghcr.io/example/app:${GIT_SHA}
-          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:0123456789abcdef"
+          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     artifact:
       name: image
 ```
 
 The v1 resolver intentionally does not parse JSON envelopes, files, or shell
 environment state from the child process. The marker must be printed to stdout.
-It also does not validate the URI scheme or digest pin; a bad URI may be
-rejected later by Takosumi or by the provider. Workflow authors should print a
-digest-pinned OCI image URI for `web-service@v1`, or a provider-specific
-immutable artifact reference when `workflowRef.target` writes to another field.
+When the artifact is written to `spec.image` (the default target), the URI must
+be digest-pinned as `<image>@sha256:<64-hex>`. A resource can use
+`workflowRef.target` for provider-specific immutable artifact references that
+are not OCI image URIs.
 
 ## Legacy v0 Contract
 
@@ -101,7 +101,7 @@ through the operator process environment.
 | The job has no `artifact` field            | `push` fails before POST                                                                                         |
 | v1 job produces no marker                  | `push` fails with `workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI` |
 | v0 job produces no non-empty stdout line   | `push` fails with `workflow job '<job>' produced no stdout; cannot resolve artifact URI`                         |
-| URI is present but not digest-pinned       | `push` succeeds; downstream validation/provider may reject                                                       |
+| `spec.image` URI is not digest-pinned      | `push` fails before POST                                                                                         |
 
 `--dry-run` still executes the workflow and resolves the URI, but it prints the
 cleaned manifest instead of sending `POST /v1/deployments`.

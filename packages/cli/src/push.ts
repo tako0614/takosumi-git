@@ -105,6 +105,7 @@ export type GitRunner = (
 
 const DEFAULT_ARTIFACT_CONTRACT: ArtifactContract = "v1";
 const ARTIFACT_MARKER_PREFIX = "TAKOSUMI_ARTIFACT=";
+const digestPinnedImagePattern = /^.+@sha256:[0-9a-f]{64}$/;
 const WORKFLOW_ENV_ALLOWLIST = [
   "PATH",
   "HOME",
@@ -359,6 +360,18 @@ function setResourceArtifactTarget(
   current[parts[parts.length - 1]] = uri;
 }
 
+function validateResolvedArtifactTarget(
+  entry: ResourceEntry,
+  uri: string,
+): void {
+  const target = entry.workflowRef.target ?? "spec.image";
+  if (target !== "spec.image") return;
+  if (digestPinnedImagePattern.test(uri)) return;
+  throw new Error(
+    `workflow job '${entry.workflowRef.job}' (resource '${entry.name}') resolved '${uri}', but spec.image artifacts must be digest-pinned as <image>@sha256:<64-hex>`,
+  );
+}
+
 function setResourceProvenanceMetadata(
   manifest: Record<string, unknown>,
   index: number,
@@ -506,6 +519,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
       );
     }
 
+    validateResolvedArtifactTarget(entry, result.artifact.uri);
     setResourceArtifactTarget(
       manifest,
       entry.index,

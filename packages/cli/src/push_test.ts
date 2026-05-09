@@ -47,13 +47,20 @@ async function makeProject(opts: {
 const fakeOk: StepExecutor = (_run, _ctx) =>
   Promise.resolve({
     stdout:
-      "build complete\nTAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:deadbeef\n",
+      "build complete\nTAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
     exitCode: 0,
   });
 
 const fakeLegacyOk: StepExecutor = (_run, _ctx) =>
   Promise.resolve({
-    stdout: "build complete\nghcr.io/example/app@sha256:deadbeef\n",
+    stdout:
+      "build complete\nghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+    exitCode: 0,
+  });
+
+const fakeUnpinnedImage: StepExecutor = (_run, _ctx) =>
+  Promise.resolve({
+    stdout: "TAKOSUMI_ARTIFACT=ghcr.io/example/app:latest\n",
     exitCode: 0,
   });
 
@@ -193,7 +200,10 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
       string,
       unknown
     >;
-    assertEquals(spec.image, "ghcr.io/example/app@sha256:deadbeef");
+    assertEquals(
+      spec.image,
+      "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
     assertEquals(provenance.workflowRunId, "takosumi-git:run:test");
     assertEquals(
       provenance.gitCommitSha,
@@ -204,9 +214,13 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
     assertEquals(result.resolved[0].resource, "web");
     assertEquals(
       result.resolved[0].artifact.uri,
-      "ghcr.io/example/app@sha256:deadbeef",
+      "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
-    assert(dryRunOutput.includes("ghcr.io/example/app@sha256:deadbeef"));
+    assert(
+      dryRunOutput.includes(
+        "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      ),
+    );
     assertEquals(fetchCalls, 0, "dry-run must not call fetch");
   } finally {
     await project.cleanup();
@@ -232,7 +246,7 @@ if [ -n "$TAKOS_TOKEN$OIDC_CLIENT_SECRET$DATABASE_URL" ]; then
 else
   echo "isolated"
 fi
-echo "TAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:deadbeef"
+echo "TAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 `,
       {
         job: "build-image",
@@ -475,7 +489,7 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
     assertEquals(body.provenance.resourceArtifacts[0].resourceName, "api");
     assertEquals(
       body.provenance.resourceArtifacts[0].artifactUri,
-      "ghcr.io/example/app@sha256:deadbeef",
+      "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
     assertEquals(
       body.provenance.resourceArtifacts[0].stepLogs[0].stepName,
@@ -492,7 +506,10 @@ Deno.test("push posts cleaned manifest body to takosumi /v1/deployments", async 
       string,
       unknown
     >;
-    assertEquals(spec.image, "ghcr.io/example/app@sha256:deadbeef");
+    assertEquals(
+      spec.image,
+      "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
     assertEquals(
       resourceProvenance.workflowRunId,
       "takosumi-git:run:post-test",
@@ -748,7 +765,7 @@ Deno.test("push leaves resource entries without workflowRef untouched", async ()
     );
     assertEquals(
       (apiEntry.spec as Record<string, unknown>).image,
-      "ghcr.io/example/app@sha256:deadbeef",
+      "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     );
     // The static resource never had workflowRef; should be unchanged.
     assert(!("workflowRef" in staticEntry));
@@ -841,6 +858,60 @@ Deno.test("push rejects v1 workflows that only emit legacy stdout artifacts", as
   }
 });
 
+Deno.test("push rejects non-digest-pinned spec.image artifacts", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "api",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "PLACEHOLDER", port: 8080 },
+          workflowRef: {
+            file: "build.yml",
+            job: "build",
+            artifact: "image",
+          },
+        },
+      ],
+    },
+    workflows: {
+      "build.yml": {
+        version: "0",
+        jobs: [
+          {
+            name: "build",
+            steps: [{ name: "s", run: "true" }],
+            artifact: { name: "image" },
+          },
+        ],
+      },
+    },
+  });
+
+  try {
+    await assertRejects(
+      () =>
+        push({
+          endpoint: "http://nope",
+          token: "x",
+          manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+          workflowsDir: join(project.root, ".takosumi", "workflows"),
+          mode: "apply",
+          dryRun: true,
+          executorFactory: () => fakeUnpinnedImage,
+          stdout: () => {},
+        }),
+      Error,
+      "spec.image artifacts must be digest-pinned",
+    );
+  } finally {
+    await project.cleanup();
+  }
+});
+
 Deno.test("push supports explicit v0 and auto fallback artifact contracts", async () => {
   const project = await makeProject({
     manifest: {
@@ -889,7 +960,7 @@ Deno.test("push supports explicit v0 and auto fallback artifact contracts", asyn
       });
       assertEquals(
         result.resolved[0].artifact.uri,
-        "ghcr.io/example/app@sha256:deadbeef",
+        "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
       );
     }
   } finally {

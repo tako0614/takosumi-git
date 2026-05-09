@@ -26,8 +26,10 @@ Deno.test("E2E: workflow runs, manifest is generated, kernel receives it", async
   const event = manualEvent("ci");
   const expectedArtifact: ResolvedArtifact = {
     name: "app-image",
-    uri: "ghcr.io/example/app@sha256:0123456789",
-    digest: "sha256:0123456789",
+    uri:
+      "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    digest:
+      "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   };
 
   const result = await runWorkflow({
