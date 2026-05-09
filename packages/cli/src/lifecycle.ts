@@ -1,4 +1,5 @@
 import { parseArgs } from "@std/cli/parse-args";
+import { dirname } from "@std/path";
 
 type LifecycleOperation = "materialize" | "export";
 
@@ -22,6 +23,7 @@ export interface ParsedLifecycleArgs {
       readonly recipients: readonly string[];
     };
     readonly scope: Record<string, unknown>;
+    readonly outputPath?: string;
   };
 }
 
@@ -31,6 +33,11 @@ export interface LifecycleResult {
   readonly response: {
     readonly status: number;
     readonly body: unknown;
+  };
+  readonly download?: {
+    readonly url: string;
+    readonly outputPath: string;
+    readonly bytes: number;
   };
 }
 
@@ -108,6 +115,7 @@ export function parseLifecycleArgs(
       "recipient",
       "data",
       "secrets",
+      "output",
     ],
     boolean: ["cost-ack", "include-data", "json"],
     default: {
@@ -183,6 +191,7 @@ export function parseLifecycleArgs(
         data: commaSeparated(flags.data),
         secrets: flags.secrets,
       }),
+      ...(flags.output ? { outputPath: String(flags.output) } : {}),
     },
   };
 }
@@ -210,6 +219,13 @@ export async function runLifecycle(
   if (response.status >= 400) {
     throw new LifecycleApplyError(options.operation, response.status, body);
   }
+  const download = options.operation === "export" && options.export?.outputPath
+    ? await downloadExportBundle({
+      fetch: options.fetch ?? fetch,
+      body,
+      outputPath: options.export.outputPath,
+    })
+    : undefined;
   return {
     operation: options.operation,
     request,
@@ -217,6 +233,7 @@ export async function runLifecycle(
       status: response.status,
       body,
     },
+    ...(download ? { download } : {}),
   };
 }
 
@@ -263,6 +280,13 @@ function renderLifecycleResult(result: LifecycleResult): string {
     `Export operation ${stringValue(body.operationId) ?? "unknown"}`,
     `  status: ${stringValue(body.status) ?? "preparing"}`,
     `  tracking: ${stringValue(body.trackingUrl) ?? "unknown"}`,
+    ...(result.download
+      ? [
+        `  download: ${result.download.url}`,
+        `  output: ${result.download.outputPath}`,
+        `  bytes: ${result.download.bytes}`,
+      ]
+      : []),
   ].join("\n") + "\n";
 }
 
@@ -301,6 +325,7 @@ OPTIONS:
   --recipient <age1...,...>  age recipients when encryption method is age
   --data <name,...>          data scope labels
   --secrets <mode>           secret export scope mode
+  --output <path>            write the bundle when the operation returns downloadUrl
   --idempotency-key <key>    idempotency key (default random UUID)
   --json                     print JSON
 `;
@@ -337,6 +362,34 @@ function objectFromEntries(
     result[key] = value;
   }
   return result;
+}
+
+async function downloadExportBundle(input: {
+  fetch: typeof fetch;
+  body: unknown;
+  outputPath: string;
+}): Promise<LifecycleResult["download"]> {
+  const body = isRecord(input.body) ? input.body : {};
+  const downloadUrl = stringValue(body.downloadUrl);
+  if (!downloadUrl) {
+    throw new Error(
+      "export did not return a downloadUrl; rerun with the same idempotency key after the operation is ready",
+    );
+  }
+  const response = await input.fetch(downloadUrl, {
+    headers: { accept: "application/octet-stream" },
+  });
+  if (!response.ok) {
+    throw new Error(`export download returned HTTP ${response.status}`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  await Deno.mkdir(dirname(input.outputPath), { recursive: true });
+  await Deno.writeFile(input.outputPath, bytes);
+  return {
+    url: downloadUrl,
+    outputPath: input.outputPath,
+    bytes: bytes.byteLength,
+  };
 }
 
 function commaSeparated(value: unknown): readonly string[] {

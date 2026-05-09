@@ -309,10 +309,11 @@ Takosumi Accounts updates the AppInstallation source pin and appends an
 `takosumi-git materialize`, `takosumi-git export`, and `takosumi-git import` are
 thin clients for the Takosumi Accounts lifecycle API. Materialize/export request
 the operation and return the operation tracking URL; provider workers complete
-the runtime move or bundle creation asynchronously. Import reads a JSON
-AppInstallation export bundle, or a `tar.zst` archive containing
-`takos-export/bundle.json`, and creates the target AppInstallation through
-Accounts.
+the runtime move or bundle creation asynchronously. When an export response is
+already completed and includes `downloadUrl`, `takosumi-git export --output`
+downloads that bundle to disk. Import reads a JSON AppInstallation export
+bundle, or a `tar.zst` archive containing `takos-export/bundle.json`, and
+creates the target AppInstallation through Accounts.
 
 ```bash
 takosumi-git materialize inst_01J... \
@@ -327,7 +328,8 @@ takosumi-git export inst_01J... \
   --accounts-url http://127.0.0.1:8787 \
   --include-data \
   --encryption-method age \
-  --recipient age1...
+  --recipient age1... \
+  --output ./takos-export.tar.zst
 
 takosumi-git import ./takos-export.tar.zst \
   --to http://127.0.0.1:8787 \

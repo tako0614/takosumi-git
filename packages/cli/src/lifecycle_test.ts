@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import { parseLifecycleArgs, runLifecycle } from "./lifecycle.ts";
 
 Deno.test("parseLifecycleArgs reads materialize options from env", () => {
@@ -141,6 +142,8 @@ Deno.test("parseLifecycleArgs reads export options", () => {
     "postgres,blobs",
     "--secrets",
     "templates-only",
+    "--output",
+    "takos-export.tar.zst",
     "--accounts-url",
     "http://accounts.example",
   ]);
@@ -155,6 +158,7 @@ Deno.test("parseLifecycleArgs reads export options", () => {
     data: ["postgres", "blobs"],
     secrets: "templates-only",
   });
+  assertEquals(parsed.export?.outputPath, "takos-export.tar.zst");
 });
 
 Deno.test("parseLifecycleArgs requires age recipients", () => {
@@ -231,4 +235,60 @@ Deno.test("runLifecycle posts an export operation", async () => {
       secrets: "templates-only",
     },
   });
+});
+
+Deno.test("runLifecycle downloads completed export bundle output", async () => {
+  const requests: Request[] = [];
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-export-" });
+  try {
+    const outputPath = join(root, "takos-export.tar.zst");
+    const result = await runLifecycle({
+      operation: "export",
+      installationId: "inst_1",
+      accountsUrl: "http://accounts.example/",
+      idempotencyKey: "idem-export-output",
+      json: false,
+      export: {
+        includeData: false,
+        encryption: {
+          method: "none",
+          recipients: [],
+        },
+        scope: {},
+        outputPath,
+      },
+      fetch: (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (request.url === "https://downloads.example.test/export.tar.zst") {
+          return Promise.resolve(
+            new Response(new Uint8Array([1, 2, 3]), {
+              headers: { "content-type": "application/octet-stream" },
+            }),
+          );
+        }
+        return Promise.resolve(Response.json({
+          operationId: "op_export",
+          status: "exported",
+          trackingUrl:
+            "/v1/installations/inst_1/events?types=installation.export-requested",
+          downloadUrl: "https://downloads.example.test/export.tar.zst",
+          downloadExpiresAt: "2999-05-10T00:00:00.000Z",
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(result.download, {
+      url: "https://downloads.example.test/export.tar.zst",
+      outputPath,
+      bytes: 3,
+    });
+    assertEquals(await Deno.readFile(outputPath), new Uint8Array([1, 2, 3]));
+    assertEquals(requests.map((request) => request.url), [
+      "http://accounts.example/v1/installations/inst_1/export",
+      "https://downloads.example.test/export.tar.zst",
+    ]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
 });

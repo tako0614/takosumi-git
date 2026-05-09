@@ -60,6 +60,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "installation.rolled_back",
       "takosumi-git materialize inst_01J",
       "takosumi-git export inst_01J",
+      "--output ./takos-export.tar.zst",
       "POST /v1/installations/{installation-id}/materialize",
       "POST /v1/installations/{installation-id}/export",
       "Idempotency-Key",
@@ -97,6 +98,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   assert.ok(deployClientSource.includes("/v1/deployments"));
   assert.ok(lifecycleSource.includes("runMaterializeCli"));
   assert.ok(lifecycleSource.includes("runExportCli"));
+  assert.ok(lifecycleSource.includes("downloadExportBundle"));
   assert.ok(lifecycleSource.includes("idempotency-key"));
   assert.ok(serveSource.includes("/v1/install/apply"));
   assert.ok(serveSource.includes("handleInstallApplyRequest"));
@@ -104,6 +106,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   assert.ok(mainSource.includes("install     Install .takosumi/app.yml"));
   assert.ok(mainSource.includes("materialize Request shared-cell"));
   assert.ok(mainSource.includes("export      Request a self-host"));
+  assert.ok(mainSource.includes("--output <path>"));
   assert.ok(mainSource.includes("--source-commit <sha>"));
   assert.ok(mainSource.includes("--ref <ref>"));
   assert.ok(initSource.includes("appSkeleton"));
