@@ -13,6 +13,7 @@ import { runInitCli } from "./init.ts";
 import { runHistoryCli } from "./history.ts";
 import { runServeCli } from "./serve.ts";
 import { runInstallCli } from "./install.ts";
+import { runImportCli } from "./import.ts";
 import { runExportCli, runMaterializeCli } from "./lifecycle.ts";
 import { runRollbackCli, runUpgradeCli } from "./revision.ts";
 
@@ -29,6 +30,7 @@ COMMANDS:
   init        Scaffold .takosumi/app.yml, manifest.yml, and workflows
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
   install     Install .takosumi/app.yml metadata from a local repo or Git URL
+  import      Import a portable AppInstallation export bundle
   upgrade     Preview or apply an AppInstallation source revision
   rollback    Preview or apply an AppInstallation rollback revision
   materialize Request shared-cell to dedicated materialization
@@ -78,6 +80,18 @@ INSTALL OPTIONS:
   --service-resolver-public-key <key>
                                Ed25519 public key for the anchor
   --json                       print preview JSON
+
+IMPORT OPTIONS:
+  import <bundle.json>         import a JSON AppInstallation export bundle
+  --to <url>                   target Takosumi Accounts URL
+  --accounts-url <url>         alias for --to
+  --account-id <id>            target account id
+  --space-id <id>              target space id
+  --subject <tsub_...>         import operator subject
+  --auth-issuer <url>          target OIDC issuer
+  --installation-id <id>       target installation id
+  --mode <mode>                dedicated | self-hosted
+  --json                       print JSON
 
 UPGRADE / ROLLBACK OPTIONS:
   upgrade <id> --ref <ref>     preview an upgrade target
@@ -143,6 +157,9 @@ export async function run(args: readonly string[]): Promise<number> {
   }
   if (first === "install") {
     return await runInstallCli(rest);
+  }
+  if (first === "import") {
+    return await runImportCli(rest);
   }
   if (first === "upgrade") {
     return await runUpgradeCli(rest);

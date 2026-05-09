@@ -306,10 +306,12 @@ Takosumi Accounts updates the AppInstallation source pin and appends an
 
 ## Materialize and export
 
-`takosumi-git materialize` and `takosumi-git export` are thin clients for the
-Takosumi Accounts lifecycle API. They request the operation and return the
-operation tracking URL; provider workers complete the runtime move or bundle
-creation asynchronously.
+`takosumi-git materialize`, `takosumi-git export`, and `takosumi-git import` are
+thin clients for the Takosumi Accounts lifecycle API. Materialize/export request
+the operation and return the operation tracking URL; provider workers complete
+the runtime move or bundle creation asynchronously. Import reads a JSON
+AppInstallation export bundle and creates the target AppInstallation through
+Accounts.
 
 ```bash
 takosumi-git materialize inst_01J... \
@@ -325,6 +327,13 @@ takosumi-git export inst_01J... \
   --include-data \
   --encryption-method age \
   --recipient age1...
+
+takosumi-git import ./takos-export.bundle.json \
+  --to http://127.0.0.1:8787 \
+  --account-id acct_self_host \
+  --space-id space_self_host \
+  --subject tsub_owner \
+  --auth-issuer https://accounts.self-host.example
 ```
 
 The CLI posts:
@@ -332,7 +341,11 @@ The CLI posts:
 ```text
 POST /v1/installations/{installation-id}/materialize
 POST /v1/installations/{installation-id}/export
+POST /v1/installations/import
 ```
 
-Both commands send an `Idempotency-Key` header. Pass `--idempotency-key` to
-reuse a known key across retries.
+Materialize and export send an `Idempotency-Key` header. Pass
+`--idempotency-key` to reuse a known key across retries. JSON import accepts the
+same header for future-compatible retries. Direct `tar.zst` archive parsing is
+not implemented in the CLI yet; pass the JSON
+`takosumi.accounts.installation-export-bundle@v1` payload.

@@ -37,9 +37,9 @@ takes manifests by explicit path or HTTP body and has no opinion on file layout
 
 ## Status
 
-`takosumi-git init`, `push`, `install`, `upgrade`, `rollback`, `materialize`,
-`export`, `serve`, and `history` are implemented. `init` scaffolds the
-`.takosumi/` project layout (`app.yml` + `manifest.yml` +
+`takosumi-git init`, `push`, `install`, `import`, `upgrade`, `rollback`,
+`materialize`, `export`, `serve`, and `history` are implemented. `init`
+scaffolds the `.takosumi/` project layout (`app.yml` + `manifest.yml` +
 `workflows/build.yml`). `push` parses `.takosumi/manifest.yml` (a takosumi v1
 manifest envelope), resolves each `resources[i].workflowRef` by running the
 referenced workflow job's steps (via `bash -lc`) and reading the v1
@@ -51,7 +51,8 @@ via `POST /v1/deployments`. `install` previews `.takosumi/app.yml`, creates an
 AppInstallation in Takosumi Accounts, can deploy the compiled manifest to a
 kernel, injects materialized runtime env, and patches installation status.
 `upgrade` / `rollback` preview or apply source revision changes through the
-Accounts ledger. `materialize` requests shared-cell to dedicated runtime
+Accounts ledger. `import` reads a JSON AppInstallation export bundle and posts
+it to Takosumi Accounts. `materialize` requests shared-cell to dedicated runtime
 materialization, and `export` requests a self-host bundle operation through
 Takosumi Accounts. `history` lists manifest commits and renders per-resource
 semantic diffs. `serve` exposes GitHub / GitLab / Gitea webhook routes with
