@@ -77,7 +77,7 @@ POST /v1/installations
 The request carries the AppInstallation source pin, `appManifestDigest`,
 `compiledManifestDigest` when `.takosumi/manifest.yml` is present, AppBinding
 records derived from `app.yml` binding declarations, service import requests
-derived from `service.import@v1`, and AppGrant records derived from
+derived from `app.yml` `serviceImports[]`, and AppGrant records derived from
 `permissions.requested`. When `--runtime-base-url` (or
 `TAKOSUMI_RUNTIME_BASE_URL`) is supplied, `identity.oidc@v1` redirect paths are
 materialized into absolute redirect URIs and sent as an `oidcClients[]` request
@@ -122,13 +122,16 @@ secret refs without changing the original approval evidence.
 
 ## Service Imports
 
-`service.import@v1` bindings are the installer-facing vocabulary for external
-Takosumi services such as `takosumi.account.auth@v1`. Preview surfaces the
-binding name, alias, service identifier, requested endpoint roles, and refresh
-policy so approval is explicit.
+`serviceImports[]` is installer-facing metadata for external Takosumi services
+such as `takosumi.account.auth@v1`. It is separate from AppBinding declarations:
+the Binding Catalog remains the six installer-bound resource bindings, while
+service imports are compiled into manifest-level `imports[]` and persisted on
+the AppInstallation ledger as approved external service requests. Preview
+surfaces the binding name, alias, service identifier, requested endpoint roles,
+and refresh policy so approval is explicit.
 
 When a kernel manifest is present, takosumi-git compiles the app metadata into
-the manifest by merging service import bindings into top-level `imports[]`.
+the manifest by merging `serviceImports[]` entries into top-level `imports[]`.
 Existing manifest imports with the same alias must match the `app.yml`
 declaration exactly. Conflicts fail before any Accounts or kernel request is
 made.

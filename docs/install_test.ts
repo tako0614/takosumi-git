@@ -23,7 +23,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "--endpoint",
       "--deploy-token",
       "takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>",
-      "service.import@v1",
+      "serviceImports[]",
       "--service-resolver-url",
       "TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY",
       "A kernel HTTP 4xx/5xx response makes the CLI exit",

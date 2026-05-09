@@ -88,8 +88,8 @@ const PINNED_APP_YML = VALID_APP_YML.replace(
 
 const SERVICE_IMPORT_APP_YML = VALID_APP_YML.replace(
   "install:\n",
-  `  account-auth:
-    type: service.import@v1
+  `serviceImports:
+  - binding: account-auth
     service: takosumi.account.auth@v1
     alias: account-auth
     endpointRoles:
@@ -127,12 +127,12 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   assert(preview.permissionDigest.startsWith("sha256:"));
 });
 
-Deno.test("parseInstallableAppYaml accepts service import bindings", () => {
+Deno.test("parseInstallableAppYaml accepts service import metadata", () => {
   const app = parseInstallableAppYaml(
     VALID_APP_YML.replace(
       "install:\n",
-      `  account-auth:
-    type: service.import@v1
+      `serviceImports:
+  - binding: account-auth
     service: takosumi.account.auth@v1
     alias: account-auth
     endpointRoles:
@@ -145,14 +145,13 @@ install:\n`,
     ),
   );
 
-  assertEquals(app.bindings["account-auth"], {
-    type: "service.import@v1",
-    required: true,
+  assertEquals(app.serviceImports, [{
+    binding: "account-auth",
     service: "takosumi.account.auth@v1",
     alias: "account-auth",
     endpointRoles: ["oidc-issuer", "install-launch"],
     refreshPolicy: { kind: "ttl", ttl: "300s" },
-  });
+  }]);
   const preview = buildInstallPreview(app);
   assertEquals(preview.serviceImports, [{
     binding: "account-auth",
@@ -163,7 +162,7 @@ install:\n`,
   }]);
 });
 
-Deno.test("compileInstallManifest injects service imports from app bindings", () => {
+Deno.test("compileInstallManifest injects service imports from app metadata", () => {
   const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
   const compiled = compileInstallManifest(app, MANIFEST_YML);
 
@@ -196,7 +195,7 @@ resources: []`,
         ),
       ),
     Error,
-    "conflicts with app.yml binding",
+    "conflicts with app.yml serviceImports",
   );
 });
 
@@ -232,14 +231,14 @@ Deno.test("parseInstallableAppYaml rejects unsupported binding catalog entries",
   );
 });
 
-Deno.test("parseInstallableAppYaml rejects malformed service import bindings", () => {
+Deno.test("parseInstallableAppYaml rejects malformed service import metadata", () => {
   const error = assertThrows(
     () =>
       parseInstallableAppYaml(
         VALID_APP_YML.replace(
           "install:\n",
-          `  account-auth:
-    type: service.import@v1
+          `serviceImports:
+  - binding: account-auth
     service: takosumi.account.auth.oidc@v1
     endpointRoles:
       - OIDC
@@ -254,15 +253,15 @@ install:\n`,
 
   assertStringIncludes(
     error.message,
-    "bindings.account-auth.service must be a forward 3-level service identifier",
+    "serviceImports[0].service must be a forward 3-level service identifier",
   );
   assertStringIncludes(
     error.message,
-    "bindings.account-auth.endpointRoles must contain endpoint role identifiers",
+    "serviceImports[0].endpointRoles must contain endpoint role identifiers",
   );
   assertStringIncludes(
     error.message,
-    "bindings.account-auth.refreshPolicy.ttl must be a duration",
+    "serviceImports[0].refreshPolicy.ttl must be a duration",
   );
 });
 
@@ -538,7 +537,7 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       body.bindings.some((binding: { kind: string }) =>
         binding.kind === "service.import@v1"
       ),
-      true,
+      false,
     );
     assertEquals(body.oidcClients, [{
       binding: "auth",

@@ -89,8 +89,12 @@ runtime:
   modes:
     - shared-cell
 bindings:
-  account-auth:
-    type: service.import@v1
+  bootstrap:
+    type: install-launch-token@v1
+    required: true
+    consumePath: /_takosumi/launch
+serviceImports:
+  - binding: account-auth
     service: takosumi.account.auth@v1
     endpointRoles:
       - oidc-issuer

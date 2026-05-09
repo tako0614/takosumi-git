@@ -26,7 +26,6 @@ export const INSTALLABLE_APP_BINDING_TYPES = [
   "domain.http@v1",
   "deploy-intent.gitops@v1",
   "install-launch-token@v1",
-  "service.import@v1",
 ] as const;
 
 export const INSTALLABLE_APP_RUNTIME_MODES = [
@@ -76,6 +75,7 @@ export interface InstallableApp {
     readonly modes: readonly InstallableAppRuntimeMode[];
   };
   readonly bindings: Readonly<Record<string, InstallableAppBinding>>;
+  readonly serviceImports: readonly InstallableAppServiceImport[];
   readonly install: {
     readonly healthcheckPath: string;
     readonly postInstallLaunchPath: string;
@@ -119,9 +119,13 @@ export interface InstallableAppBinding {
   readonly writePathPrefix?: string;
   readonly consumePath?: string;
   readonly maxLifetimeSeconds?: number;
-  readonly service?: string;
-  readonly alias?: string;
-  readonly endpointRoles?: readonly string[];
+}
+
+export interface InstallableAppServiceImport {
+  readonly binding: string;
+  readonly alias: string;
+  readonly service: string;
+  readonly endpointRoles: readonly string[];
   readonly refreshPolicy?: Record<string, unknown>;
 }
 
@@ -540,6 +544,121 @@ function parseBindings(
   return bindings;
 }
 
+function parseServiceImports(
+  record: Record<string, unknown>,
+  issues: InstallableAppValidationIssue[],
+): readonly InstallableAppServiceImport[] {
+  const raw = record.serviceImports;
+  if (raw === undefined) return [];
+  if (!Array.isArray(raw)) {
+    issues.push({ path: "serviceImports", message: "must be an array" });
+    return [];
+  }
+  if (raw.length > 32) {
+    issues.push({
+      path: "serviceImports",
+      message: "must contain 0-32 entries",
+    });
+  }
+  const imports: InstallableAppServiceImport[] = [];
+  const seenAliases = new Set<string>();
+  for (const [index, entry] of raw.entries()) {
+    const path = `serviceImports[${index}]`;
+    if (!isRecord(entry)) {
+      issues.push({ path, message: "must be an object" });
+      continue;
+    }
+    unknownKeys(
+      entry,
+      path,
+      ["binding", "alias", "service", "endpointRoles", "refreshPolicy"],
+      issues,
+    );
+    const binding = serviceImportStringField(
+      entry,
+      "binding",
+      `${path}.binding`,
+      issues,
+    );
+    if (binding && !bindingNamePattern.test(binding)) {
+      issues.push({
+        path: `${path}.binding`,
+        message: "must match binding name syntax",
+      });
+    }
+    const alias =
+      optionalStringField(entry, "alias", `${path}.alias`, issues) ??
+        binding;
+    if (alias && !bindingNamePattern.test(alias)) {
+      issues.push({
+        path: `${path}.alias`,
+        message: "must match binding name syntax",
+      });
+    }
+    if (alias && seenAliases.has(alias)) {
+      issues.push({ path: `${path}.alias`, message: "must be unique" });
+    } else if (alias) seenAliases.add(alias);
+
+    const service = serviceImportStringField(
+      entry,
+      "service",
+      `${path}.service`,
+      issues,
+    );
+    if (service && !serviceIdentifierPattern.test(service)) {
+      issues.push({
+        path: `${path}.service`,
+        message: "must be a forward 3-level service identifier",
+      });
+    }
+    const endpointRoles = validateOptionalStringArray(
+      entry.endpointRoles,
+      `${path}.endpointRoles`,
+      issues,
+    );
+    if (!endpointRoles || endpointRoles.length < 1) {
+      issues.push({
+        path: `${path}.endpointRoles`,
+        message: "must contain at least one endpoint role",
+      });
+    } else if (endpointRoles.some((role) => !endpointRolePattern.test(role))) {
+      issues.push({
+        path: `${path}.endpointRoles`,
+        message: "must contain endpoint role identifiers",
+      });
+    }
+    const refreshPolicy = validateServiceImportRefreshPolicy(
+      entry.refreshPolicy,
+      `${path}.refreshPolicy`,
+      issues,
+    );
+    if (
+      binding && alias && service && endpointRoles && endpointRoles.length > 0
+    ) {
+      imports.push({
+        binding,
+        alias,
+        service,
+        endpointRoles,
+        ...(refreshPolicy ? { refreshPolicy } : {}),
+      });
+    }
+  }
+  return imports.sort((a, b) => a.alias.localeCompare(b.alias));
+}
+
+function serviceImportStringField(
+  record: Record<string, unknown>,
+  key: string,
+  path: string,
+  issues: InstallableAppValidationIssue[],
+): string {
+  const value = record[key];
+  if (typeof value === "string" && value.length > 0) return value;
+  issues.push({ path, message: "is required" });
+  return "";
+}
+
 function bindingAllowedKeys(
   type: InstallableAppBindingType,
 ): readonly string[] {
@@ -569,8 +688,6 @@ function bindingAllowedKeys(
       return [...common, "branch", "writePathPrefix"];
     case "install-launch-token@v1":
       return [...common, "consumePath", "maxLifetimeSeconds"];
-    case "service.import@v1":
-      return [...common, "service", "alias", "endpointRoles", "refreshPolicy"];
   }
 }
 
@@ -780,75 +897,15 @@ function parseBindingSpecificFields(
         });
       } else binding.maxLifetimeSeconds = maxLifetimeSeconds;
     }
-  } else if (type === "service.import@v1") {
-    const service = optionalStringField(
-      raw,
-      "service",
-      `bindings.${name}.service`,
-      issues,
-    );
-    if (!service) {
-      issues.push({
-        path: `bindings.${name}.service`,
-        message: "is required",
-      });
-    } else if (!serviceIdentifierPattern.test(service)) {
-      issues.push({
-        path: `bindings.${name}.service`,
-        message: "must be a forward 3-level service identifier",
-      });
-    } else binding.service = service;
-
-    const alias = optionalStringField(
-      raw,
-      "alias",
-      `bindings.${name}.alias`,
-      issues,
-    );
-    if (alias !== undefined) {
-      if (!bindingNamePattern.test(alias)) {
-        issues.push({
-          path: `bindings.${name}.alias`,
-          message: "must match binding name syntax",
-        });
-      } else binding.alias = alias;
-    }
-
-    const endpointRoles = validateOptionalStringArray(
-      raw.endpointRoles,
-      `bindings.${name}.endpointRoles`,
-      issues,
-    );
-    if (!endpointRoles || endpointRoles.length < 1) {
-      issues.push({
-        path: `bindings.${name}.endpointRoles`,
-        message: "must contain at least one endpoint role",
-      });
-    } else if (endpointRoles.some((role) => !endpointRolePattern.test(role))) {
-      issues.push({
-        path: `bindings.${name}.endpointRoles`,
-        message: "must contain endpoint role identifiers",
-      });
-    } else binding.endpointRoles = endpointRoles;
-
-    const refreshPolicy = validateServiceImportRefreshPolicy(
-      raw.refreshPolicy,
-      `bindings.${name}.refreshPolicy`,
-      issues,
-    );
-    if (refreshPolicy) binding.refreshPolicy = refreshPolicy;
   }
 }
 
 function bindingRequired(
-  type: InstallableAppBindingType,
+  _type: InstallableAppBindingType,
   record: Record<string, unknown>,
   path: string,
   issues: InstallableAppValidationIssue[],
 ): boolean {
-  if (record.required === undefined && type === "service.import@v1") {
-    return true;
-  }
   return booleanField(record, "required", path, issues);
 }
 
@@ -905,6 +962,7 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
     "entry",
     "runtime",
     "bindings",
+    "serviceImports",
     "install",
     "permissions",
     "upgrade",
@@ -1000,6 +1058,7 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
   ) as InstallableAppRuntimeMode[];
 
   const bindings = parseBindings(input, issues);
+  const serviceImports = parseServiceImports(input, issues);
 
   const install = requiredRecord(input, "install", issues);
   unknownKeys(install, "install", [
@@ -1059,6 +1118,7 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
     entry: { manifest },
     runtime: { modes },
     bindings,
+    serviceImports,
     install: { healthcheckPath, postInstallLaunchPath },
     permissions: { requested },
     ...(upgrade ? { upgrade } : {}),
@@ -1198,6 +1258,7 @@ export function buildInstallPreview(
   if (app.compatibility?.kernel) requirements.kernel = app.compatibility.kernel;
   const permissionDigest = digestJson({
     bindingKinds: bindings.map((binding) => binding.type).sort(),
+    serviceImports: app.serviceImports,
     grants: [...app.permissions.requested].sort(),
   });
   return {
@@ -1301,17 +1362,14 @@ function renderHumanPreview(preview: InstallPreview): string {
 export function buildInstallServiceImportPreview(
   app: InstallableApp,
 ): readonly InstallServiceImportPreview[] {
-  return Object.entries(app.bindings)
-    .filter((entry): entry is [string, InstallableAppBinding] =>
-      entry[1].type === "service.import@v1"
-    )
-    .map(([name, binding]) => ({
-      binding: name,
-      alias: binding.alias ?? name,
-      service: binding.service ?? "",
-      endpointRoles: binding.endpointRoles ?? [],
-      ...(binding.refreshPolicy
-        ? { refreshPolicy: binding.refreshPolicy }
+  return app.serviceImports
+    .map((serviceImport) => ({
+      binding: serviceImport.binding,
+      alias: serviceImport.alias,
+      service: serviceImport.service,
+      endpointRoles: serviceImport.endpointRoles,
+      ...(serviceImport.refreshPolicy
+        ? { refreshPolicy: serviceImport.refreshPolicy }
         : {}),
     }))
     .sort((a, b) => a.alias.localeCompare(b.alias));
@@ -1375,7 +1433,7 @@ function mergeKernelServiceImports(
           digestJson(serviceImport.refreshPolicy ?? {})
       ) {
         throw new Error(
-          `entry manifest imports.${serviceImport.alias} conflicts with app.yml binding`,
+          `entry manifest imports.${serviceImport.alias} conflicts with app.yml serviceImports`,
         );
       }
       continue;
