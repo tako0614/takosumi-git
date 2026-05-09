@@ -245,6 +245,12 @@ The same values can be supplied through `TAKOSUMI_SERVICE_RESOLVER_URL` and
 `TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY`. The kernel receives only the compiled
 manifest; `.takosumi/app.yml` itself remains installer metadata.
 
+When `install apply` also deploys to a kernel endpoint, it resolves
+`resources[i].workflowRef` through the same v1 `TAKOSUMI_ARTIFACT=<uri>` stdout
+marker contract as `takosumi-git push`. The compiled manifest sent to
+`POST /v1/deployments` has `workflowRef` stripped, and any `spec.image` value
+must be digest-pinned as `<image>@sha256:<64-hex>`.
+
 ## Installer Placeholders
 
 Compiled manifests must not carry installer-only placeholders. If

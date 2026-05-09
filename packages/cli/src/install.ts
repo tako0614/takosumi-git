@@ -15,6 +15,18 @@ import {
   type ManifestEnvelope,
   postDeployment,
 } from "@takos/takosumi-git-deploy-client";
+import type {
+  ComputeWorkflowRef,
+  WorkflowEvent,
+  WorkflowFile,
+  WorkflowJobSpec,
+} from "@takos/takosumi-git-workflow-contract";
+import {
+  type ArtifactResolver,
+  runWorkflow,
+  type StepExecutor,
+  type StepOutcome,
+} from "@takos/takosumi-git-workflow-runner";
 
 export const INSTALLABLE_APP_API_VERSION = "app.takosumi.dev/v1";
 export const INSTALLABLE_APP_KIND = "InstallableApp";
@@ -223,6 +235,12 @@ export interface CompiledInstallManifest {
   readonly serviceImports: readonly KernelManifestServiceImport[];
 }
 
+interface InstallWorkflowResourceEntry {
+  readonly index: number;
+  readonly name: string;
+  readonly workflowRef: ComputeWorkflowRef;
+}
+
 export interface InstallableAppValidationIssue {
   readonly path: string;
   readonly message: string;
@@ -254,6 +272,21 @@ const pathPattern = /^\/[^?#]{0,199}$/;
 const fullCommitPattern = /^[0-9a-f]{40}$/;
 const installerPlaceholderPattern =
   /\$\{(?:params|installation|artifacts|bindings|secrets|refs)\.[^}]+}/;
+const installArtifactMarkerPrefix = "TAKOSUMI_ARTIFACT=";
+const digestPinnedImagePattern = /^.+@sha256:[0-9a-f]{64}$/;
+const workflowEnvAllowlist = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+] as const;
 const semverTagPattern = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const releaseTagPattern = /^release[/-][0-9][0-9A-Za-z._-]*$/;
 const mutableRefs = new Set([
@@ -1494,6 +1527,268 @@ function mergeKernelServiceImports(
   return { ...manifest, imports: merged };
 }
 
+async function compileInstallWorkflowRefs(input: {
+  readonly compiled: CompiledInstallManifest;
+  readonly projectRoot: string;
+  readonly workflowsDir: string;
+  readonly executorFactory?: (projectRoot: string) => StepExecutor;
+}): Promise<CompiledInstallManifest> {
+  const manifest = structuredClone(input.compiled.manifest);
+  const entries = installWorkflowResourceEntries(manifest);
+  const executorFactory = input.executorFactory ??
+    ((projectRoot: string) => defaultInstallStepExecutor(projectRoot));
+
+  for (const entry of entries) {
+    const workflowPath = join(input.workflowsDir, entry.workflowRef.file);
+    const workflow = parseYaml(await Deno.readTextFile(workflowPath));
+    if (
+      !isRecord(workflow) ||
+      !Array.isArray((workflow as unknown as { jobs: unknown }).jobs)
+    ) {
+      throw new Error(
+        `workflow file ${workflowPath} is missing a 'jobs' array`,
+      );
+    }
+    const stepStdouts: string[] = [];
+    const baseExecutor = executorFactory(input.projectRoot);
+    const wrappedExecutor: StepExecutor = async (run, context) => {
+      const outcome = await baseExecutor(run, context);
+      stepStdouts.push(outcome.stdout);
+      return outcome;
+    };
+    const result = await runWorkflow({
+      file: workflow as unknown as WorkflowFile,
+      job: entry.workflowRef.job,
+      event: {
+        kind: "manual",
+        source: `takosumi-git install ${entry.name}`,
+      } satisfies WorkflowEvent,
+      executor: wrappedExecutor,
+      resolveArtifact: installArtifactResolver(
+        () => stepStdouts,
+        entry.workflowRef,
+      ),
+    });
+    if (!result.success) {
+      throw new Error(
+        `workflow job '${entry.workflowRef.job}' (resource '${entry.name}') failed:\n${
+          result.logs.join("\n")
+        }`,
+      );
+    }
+    if (!result.artifact) {
+      throw new Error(
+        `workflow job '${entry.workflowRef.job}' (resource '${entry.name}') produced no artifact; add an 'artifact' field to the job spec so the runner resolves a URI`,
+      );
+    }
+    validateInstallArtifactTarget(entry, result.artifact.uri);
+    setInstallResourceArtifactTarget(
+      manifest,
+      entry.index,
+      result.artifact.uri,
+      entry.workflowRef.target,
+    );
+  }
+
+  stripInstallWorkflowRefs(manifest);
+  validateInstallManifestImagePins(manifest);
+  return {
+    ...input.compiled,
+    manifest,
+    digest: digestJson(manifest),
+  };
+}
+
+function installWorkflowResourceEntries(
+  manifest: Record<string, unknown>,
+): InstallWorkflowResourceEntry[] {
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return [];
+  const entries: InstallWorkflowResourceEntry[] = [];
+  for (const [index, raw] of resources.entries()) {
+    if (!isRecord(raw) || !isRecord(raw.workflowRef)) continue;
+    const ref = raw.workflowRef;
+    if (
+      typeof ref.file !== "string" ||
+      typeof ref.job !== "string" ||
+      typeof ref.artifact !== "string" ||
+      (ref.target !== undefined && typeof ref.target !== "string")
+    ) {
+      throw new Error(
+        `resources[${index}].workflowRef must have string {file, job, artifact, target?}`,
+      );
+    }
+    const target = ref.target === undefined
+      ? undefined
+      : parseInstallArtifactTarget(
+        ref.target,
+        `resources[${index}].workflowRef.target`,
+      );
+    entries.push({
+      index,
+      name: typeof raw.name === "string" ? raw.name : `resources[${index}]`,
+      workflowRef: {
+        file: ref.file,
+        job: ref.job,
+        artifact: ref.artifact,
+        ...(target ? { target } : {}),
+      },
+    });
+  }
+  return entries;
+}
+
+function parseInstallArtifactTarget(
+  value: string,
+  path: string,
+): `spec.${string}` {
+  if (!/^spec(?:\.[A-Za-z_][A-Za-z0-9_-]*)+$/.test(value)) {
+    throw new Error(
+      `${path} must be a dotted field path below spec, such as spec.image or spec.artifact.hash`,
+    );
+  }
+  return value as `spec.${string}`;
+}
+
+function installArtifactResolver(
+  capturedLogs: () => readonly string[],
+  ref: ComputeWorkflowRef,
+): ArtifactResolver {
+  return (job: WorkflowJobSpec, _event: WorkflowEvent) =>
+    Promise.resolve({
+      name: job.artifact?.name ?? ref.artifact,
+      uri: resolveInstallArtifactUri(capturedLogs(), job.name),
+    });
+}
+
+function resolveInstallArtifactUri(
+  logs: readonly string[],
+  jobName: string,
+): string {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const marker = findInstallArtifactMarker(logs[i]);
+    if (marker) return marker;
+  }
+  throw new Error(
+    `workflow job '${jobName}' produced no ${installArtifactMarkerPrefix}<uri> marker; cannot resolve artifact URI`,
+  );
+}
+
+function findInstallArtifactMarker(text: string): string | undefined {
+  const stdoutOnly = text.split("\n[stderr]\n")[0] ?? text;
+  const lines = stdoutOnly.split("\n").map((line) => line.trim()).filter((
+    line,
+  ) => line.length > 0);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line.startsWith(installArtifactMarkerPrefix)) continue;
+    const uri = line.slice(installArtifactMarkerPrefix.length).trim();
+    if (!uri) {
+      throw new Error(
+        `${installArtifactMarkerPrefix}<uri> marker must include a URI`,
+      );
+    }
+    return uri;
+  }
+}
+
+function validateInstallArtifactTarget(
+  entry: InstallWorkflowResourceEntry,
+  uri: string,
+): void {
+  const target = entry.workflowRef.target ?? "spec.image";
+  if (target !== "spec.image") return;
+  if (digestPinnedImagePattern.test(uri)) return;
+  throw new Error(
+    `workflow job '${entry.workflowRef.job}' (resource '${entry.name}') resolved '${uri}', but spec.image artifacts must be digest-pinned as <image>@sha256:<64-hex>`,
+  );
+}
+
+function setInstallResourceArtifactTarget(
+  manifest: Record<string, unknown>,
+  index: number,
+  uri: string,
+  target = "spec.image",
+): void {
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return;
+  const entry = resources[index];
+  if (!isRecord(entry)) return;
+  if (!isRecord(entry.spec)) entry.spec = {};
+  const parts = target.split(".");
+  let current = entry as Record<string, unknown>;
+  for (const part of parts.slice(0, -1)) {
+    const next = current[part];
+    if (isRecord(next)) {
+      current = next;
+      continue;
+    }
+    const created: Record<string, unknown> = {};
+    current[part] = created;
+    current = created;
+  }
+  current[parts[parts.length - 1]] = uri;
+}
+
+function stripInstallWorkflowRefs(manifest: Record<string, unknown>): void {
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return;
+  for (const entry of resources) {
+    if (isRecord(entry) && "workflowRef" in entry) delete entry.workflowRef;
+  }
+}
+
+function validateInstallManifestImagePins(
+  manifest: Record<string, unknown>,
+): void {
+  const resources = manifest.resources;
+  if (!Array.isArray(resources)) return;
+  for (const [index, resource] of resources.entries()) {
+    if (!isRecord(resource) || !isRecord(resource.spec)) continue;
+    const shape = typeof resource.shape === "string" ? resource.shape : "";
+    if (!shape.startsWith("web-service@") && !shape.startsWith("worker@")) {
+      continue;
+    }
+    const image = resource.spec.image;
+    if (typeof image !== "string") continue;
+    if (digestPinnedImagePattern.test(image)) continue;
+    throw new Error(
+      `manifest.resources[${index}].spec.image must be digest-pinned as <image>@sha256:<64-hex>`,
+    );
+  }
+}
+
+function defaultInstallStepExecutor(cwd: string): StepExecutor {
+  return async (run, _context): Promise<StepOutcome> => {
+    const command = new Deno.Command("bash", {
+      args: ["-lc", run],
+      cwd,
+      clearEnv: true,
+      env: installWorkflowSandboxEnv(),
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { code, stdout, stderr } = await command.output();
+    const out = new TextDecoder().decode(stdout);
+    const err = new TextDecoder().decode(stderr);
+    return {
+      stdout: err.length > 0 ? `${out}\n[stderr]\n${err}` : out,
+      exitCode: code,
+    };
+  };
+}
+
+function installWorkflowSandboxEnv(): Record<string, string> {
+  const env: Record<string, string> = {
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+  };
+  for (const key of workflowEnvAllowlist) {
+    const value = Deno.env.get(key);
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
+}
+
 async function tryRead(path: string): Promise<string | undefined> {
   try {
     return await Deno.readTextFile(path);
@@ -1832,6 +2127,8 @@ type LoadInstallContextOptions =
   >
   & {
     readonly checkoutSource?: InstallSourceCheckoutFactory;
+    readonly compileWorkflows?: boolean;
+    readonly executorFactory?: (projectRoot: string) => StepExecutor;
   };
 
 async function loadInstallContext(
@@ -1863,7 +2160,14 @@ async function loadInstallContext(
           : join(repoRoot, app.entry.manifest));
     const manifestText = await tryRead(manifestPath);
     const compiledManifest = manifestText
-      ? compileInstallManifest(app, manifestText)
+      ? options.compileWorkflows
+        ? await compileInstallWorkflowRefs({
+          compiled: compileInstallManifest(app, manifestText),
+          projectRoot: repoRoot,
+          workflowsDir: join(repoRoot, ".takosumi", "workflows"),
+          executorFactory: options.executorFactory,
+        })
+        : compileInstallManifest(app, manifestText)
       : undefined;
     const warnings = manifestText
       ? []
@@ -2081,10 +2385,14 @@ export async function applyInstall(
     readonly spaceId: string;
     readonly createdBySubject: string;
     readonly checkoutSource?: InstallSourceCheckoutFactory;
+    readonly executorFactory?: (projectRoot: string) => StepExecutor;
     readonly fetch?: typeof fetch;
   },
 ): Promise<InstallApplyResult> {
-  const { app, preview, compiledManifest } = await loadInstallContext(options);
+  const { app, preview, compiledManifest } = await loadInstallContext({
+    ...options,
+    compileWorkflows: Boolean(options.endpoint),
+  });
   const mode = options.mode ?? app.runtime.modes[0];
   if (!app.runtime.modes.includes(mode)) {
     throw new Error(`mode ${mode} is not supported by ${app.metadata.id}`);

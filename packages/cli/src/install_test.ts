@@ -101,6 +101,61 @@ const SERVICE_IMPORT_APP_YML = VALID_APP_YML.replace(
 install:\n`,
 );
 
+const WORKFLOW_APP_YML = `apiVersion: app.takosumi.dev/v1
+kind: InstallableApp
+metadata:
+  id: example.workflow
+  name: Workflow App
+  description: App with a workflowRef-backed runtime image
+  publisher: example
+  homepage: https://example.com
+source:
+  git: https://github.com/example/workflow
+  ref: v1.2.3
+entry:
+  manifest: .takosumi/manifest.yml
+runtime:
+  modes:
+    - dedicated
+bindings:
+  auth:
+    type: identity.oidc@v1
+    required: true
+    redirectPaths:
+      - /auth/oidc/callback
+install:
+  healthcheckPath: /health
+  postInstallLaunchPath: /_takosumi/launch
+permissions:
+  requested: []
+`;
+
+const WORKFLOW_MANIFEST_YML = `apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: workflow
+resources:
+  - name: web
+    shape: web-service@v1
+    provider: "@takos/selfhost-docker-compose"
+    spec:
+      port: 8080
+    workflowRef:
+      file: build.yml
+      job: image
+      artifact: image
+`;
+
+const WORKFLOW_FILE_YML = `version: "0"
+jobs:
+  - name: image
+    steps:
+      - name: build
+        run: echo build
+    artifact:
+      name: image
+`;
+
 Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   const app = parseInstallableAppYaml(VALID_APP_YML);
 
@@ -676,7 +731,7 @@ resources:
     name: api
     provider: "@takos/selfhost-docker-compose"
     spec:
-      image: ghcr.io/example/hello@sha256:0123456789abcdef
+      image: ghcr.io/example/hello@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
       port: 8080
       env:
         AUTH_DRIVER: oidc
@@ -876,6 +931,155 @@ resources:
       status: "ready",
       reason: "kernel deploy HTTP 200",
     });
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall compiles workflowRef before kernel deploy", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-install-workflow-",
+  });
+  const requests: Request[] = [];
+  let cleanupCalled = false;
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi", "workflows"), {
+      recursive: true,
+    });
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      WORKFLOW_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      WORKFLOW_MANIFEST_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "workflows", "build.yml"),
+      WORKFLOW_FILE_YML,
+    );
+
+    const result = await applyInstall({
+      subcommand: "apply",
+      cwd: "/unused",
+      appPath: "/unused/.takosumi/app.yml",
+      appPathSpec: ".takosumi/app.yml",
+      manifestPathSpec: ".takosumi/manifest.yml",
+      json: true,
+      sourceGitUrl: "https://github.com/example/workflow",
+      sourceRef: "v1.2.3",
+      accountsUrl: "http://accounts.example",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      endpoint: "http://kernel.example",
+      deployToken: "deploy-secret",
+      checkoutSource: () =>
+        Promise.resolve({
+          root: checkoutRoot,
+          commit: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+          cleanup: () => {
+            cleanupCalled = true;
+            return Promise.resolve();
+          },
+        }),
+      executorFactory: () => (_run, _context) =>
+        Promise.resolve({
+          stdout:
+            "build complete\nTAKOSUMI_ARTIFACT=ghcr.io/example/workflow@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\n",
+          exitCode: 0,
+        }),
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Promise.resolve(Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          }));
+        }
+        if (url.includes("/status")) {
+          return Promise.resolve(Response.json({
+            installation: { id: "inst_workflow", status: "ready" },
+          }));
+        }
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_workflow" },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(result.accounts.installationId, "inst_workflow");
+    assertEquals(result.deployment?.status, 200);
+    assertEquals(requests.length, 3);
+    assertEquals(cleanupCalled, true);
+
+    const createBody = await requests[0].json();
+    assertEquals(
+      createBody.source.commit,
+      "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    );
+    assert(
+      createBody.source.compiledManifestDigest.startsWith("sha256:"),
+    );
+
+    const deployBody = await requests[1].json();
+    const resource = deployBody.manifest.resources[0];
+    assertEquals(
+      resource.spec.image,
+      "ghcr.io/example/workflow@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+    assert(!("workflowRef" in resource));
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("applyInstall rejects non-digest-pinned deploy images", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      WORKFLOW_APP_YML.replace(
+        "ref: v1.2.3",
+        "ref: v1.2.3\n  commit: abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      ),
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      WORKFLOW_MANIFEST_YML.replace(
+        `    workflowRef:
+      file: build.yml
+      job: image
+      artifact: image`,
+        "      image: ghcr.io/example/workflow:latest",
+      ),
+    );
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: root,
+          appPath: join(root, ".takosumi", "app.yml"),
+          json: true,
+          accountsUrl: "http://accounts.example",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+          endpoint: "http://kernel.example",
+          deployToken: "deploy-secret",
+          fetch: (input, init) => {
+            requests.push(new Request(input, init));
+            return Promise.resolve(Response.json({}));
+          },
+        }),
+      Error,
+      "spec.image must be digest-pinned",
+    );
+    assertEquals(requests.length, 0);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
