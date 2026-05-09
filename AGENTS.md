@@ -41,9 +41,11 @@ envelope を `.takosumi/manifest.yml` から読み、`resources[i].workflowRef`
 - **Artifact URI は本 repo が解決**: build / upload 完了後、確定 URI を `image`
   / `bundle` / `unit` field に embed して manifest を generate する。 takosumi
   kernel に build 概念を漏らさない (image-first 原則)。
-- **`.takosumi/` directory は本 product が管理**: `.takosumi/manifest.yml` は
-  kernel が読む唯一のファイル、`.takosumi/workflows/*.yml` 等は本 product が
-  parse / 実行する。
+- **`.takosumi/` directory は本 product が管理**: 本 product は
+  `.takosumi/manifest.yml` を読み、workflow / placeholder / artifact URI を
+  解決した上で、`workflowRef` を strip した compiled manifest payload だけを
+  kernel に submit する。`.takosumi/workflows/*.yml` 等は本 product が parse /
+  実行し、kernel には渡さない。
 - **Takos 中立**: takos-app / takos-git / Takos 固有 service ID への直接依存
   は本 repo の core から作らない。Takos product 専用化しない。
 
@@ -71,7 +73,7 @@ Project layout:
 <repo>/
 ├── .takosumi/
 │   ├── app.yml              ← InstallableApp metadata for install preview/apply
-│   ├── manifest.yml         ← deploy intent (the only file submitted to takosumi)
+│   ├── manifest.yml         ← authoring deploy intent read by takosumi-git
 │   └── workflows/           ← workflow YAML referenced by resources[i].workflowRef
 │       └── *.yml
 ```
