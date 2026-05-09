@@ -667,7 +667,20 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
     );
     await Deno.writeTextFile(
       join(root, ".takosumi", "manifest.yml"),
-      MANIFEST_YML,
+      `apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: hello
+resources:
+  - shape: web-service@v1
+    name: api
+    provider: "@takos/selfhost-docker-compose"
+    spec:
+      image: ghcr.io/example/hello@sha256:0123456789abcdef
+      port: 8080
+      env:
+        AUTH_DRIVER: oidc
+`,
     );
 
     const result = await applyInstall({
@@ -696,6 +709,19 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
             outcome: { status: "succeeded" },
           }));
         }
+        if (url.endsWith("/v1/installations/inst_1/launch-token")) {
+          return Promise.resolve(Response.json({
+            issuer: "https://accounts.example",
+            audience: "example.hello",
+            algorithm: "RS256",
+            kid: "launch-test",
+            env: {
+              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+              INSTALL_LAUNCH_AUDIENCE: "example.hello",
+              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+            },
+          }));
+        }
         if (url.includes("/status")) {
           return Promise.resolve(Response.json({
             installation: { id: "inst_1", status: "ready" },
@@ -711,11 +737,20 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
             secret_refs: [
               "takosumi-accounts://installations/inst_1/bindings/auth/secrets/client-secret",
             ],
+          }, {
+            name: "bootstrap",
+            kind: "install-launch-token@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+            secret_refs: [],
           }],
+          oidc_client_secret: "client-secret",
           oidc_client: {
             client_id: "toc_1",
             installation_id: "inst_1",
             service_id: "takosumi.account.auth@v1",
+            issuer_url: "https://accounts.example",
+            redirect_uris: ["http://localhost:8787/auth/oidc/callback"],
           },
         }, { status: 202 }));
       },
@@ -733,7 +768,8 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       "takosumi-accounts://installations/inst_1/bindings/auth/oidc-client/toc_1",
     );
     assertEquals(result.accounts.oidcClient?.client_id, "toc_1");
-    assertEquals(requests.length, 3);
+    assertEquals(result.accounts.oidcClientSecret, "client-secret");
+    assertEquals(requests.length, 4);
     const body = await requests[0].json();
     assertEquals(body.serviceImports, [{
       binding: "account-auth",
@@ -755,12 +791,18 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       allowedScopes: ["openid", "profile"],
       subjectMode: "pairwise",
     }]);
-    assertEquals(requests[1].url, "http://kernel.example/v1/deployments");
     assertEquals(
-      requests[1].headers.get("authorization"),
+      requests[1].url,
+      "http://accounts.example/v1/installations/inst_1/launch-token",
+    );
+    assertEquals(requests[1].method, "GET");
+    assertEquals(requests[1].headers.get("authorization"), null);
+    assertEquals(requests[2].url, "http://kernel.example/v1/deployments");
+    assertEquals(
+      requests[2].headers.get("authorization"),
       "Bearer deploy-secret",
     );
-    const deployBody = await requests[1].json();
+    const deployBody = await requests[2].json();
     assertEquals(deployBody.mode, "apply");
     assertEquals(deployBody.manifest.imports, [{
       alias: "account-auth",
@@ -773,11 +815,26 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
       publicKey: "ed25519:pub",
     }]);
     assertEquals(
-      requests[2].url,
+      deployBody.manifest.resources[0].spec.env,
+      {
+        AUTH_DRIVER: "oidc",
+        TAKOS_INSTALLATION_ID: "inst_1",
+        BASE_URL: "http://localhost:8787",
+        OIDC_ISSUER_URL: "https://accounts.example",
+        OIDC_CLIENT_ID: "toc_1",
+        OIDC_REDIRECT_URI: "http://localhost:8787/auth/oidc/callback",
+        OIDC_CLIENT_SECRET: "client-secret",
+        INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+        INSTALL_LAUNCH_AUDIENCE: "example.hello",
+        INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+      },
+    );
+    assertEquals(
+      requests[3].url,
       "http://accounts.example/v1/installations/inst_1/status",
     );
-    assertEquals(requests[2].method, "PATCH");
-    assertEquals(await requests[2].json(), {
+    assertEquals(requests[3].method, "PATCH");
+    assertEquals(await requests[3].json(), {
       status: "ready",
       reason: "kernel deploy HTTP 200",
     });
@@ -813,6 +870,15 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
             status: 422,
           }),
         );
+      }
+      if (request.url.endsWith("/v1/installations/inst_1/launch-token")) {
+        return Promise.resolve(Response.json({
+          env: {
+            INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+            INSTALL_LAUNCH_AUDIENCE: "example.hello",
+            INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+          },
+        }));
       }
       if (request.url.includes("/status")) {
         return Promise.resolve(Response.json({
@@ -857,8 +923,9 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
     assertEquals(code, 1);
     assertStringIncludes(stdout.join(""), "kernel response: HTTP 422");
     assertStringIncludes(stdout.join(""), "status response: HTTP 200");
-    assertEquals(requests.length, 3);
-    assertEquals(await requests[2].json(), {
+    assertEquals(requests.length, 4);
+    assertEquals(requests[1].method, "GET");
+    assertEquals(await requests[3].json(), {
       status: "failed",
       reason: "kernel deploy HTTP 422",
     });

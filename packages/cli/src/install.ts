@@ -2000,6 +2000,8 @@ export interface AccountsInstallResponseSummary {
   readonly installationId?: string;
   readonly bindings: readonly Record<string, unknown>[];
   readonly oidcClient?: Record<string, unknown>;
+  readonly oidcClientSecret?: string;
+  readonly launchTokenConfig?: Record<string, unknown>;
 }
 
 function appBindingCreateRequests(
@@ -2137,12 +2139,9 @@ export async function applyInstall(
       "missing --deploy-token (or TAKOSUMI_DEPLOY_TOKEN/TAKOSUMI_TOKEN)",
     );
   }
-  const deployRequest = deployEndpoint
-    ? buildInstallDeployRequest(
-      compiledManifest,
-      options.serviceResolvers ?? [],
-    )
-    : undefined;
+  if (deployEndpoint) {
+    buildInstallDeployRequest(compiledManifest, options.serviceResolvers ?? []);
+  }
   const response = await (options.fetch ?? fetch)(
     `${normalizeBaseUrl(options.accountsUrl)}/v1/installations`,
     {
@@ -2158,12 +2157,12 @@ export async function applyInstall(
   if (response.status >= 400) {
     throw new InstallApplyError(response.status, body);
   }
-  const accounts = readAccountsInstallResponse(body);
+  let accounts = readAccountsInstallResponse(body);
   let deployment: DeployResponse | undefined;
   let statusTransition:
     | { readonly status: number; readonly body: unknown }
     | undefined;
-  if (deployRequest) {
+  if (deployEndpoint) {
     if (!deployEndpoint || !deployToken) {
       throw new Error("kernel deploy endpoint and token are required");
     }
@@ -2173,6 +2172,26 @@ export async function applyInstall(
         "accounts response missing installation id for deploy status transition",
       );
     }
+    const launchTokenConfig = appRequiresLaunchTokenConfig(app)
+      ? await fetchLaunchTokenConfig({
+        accountsUrl: options.accountsUrl,
+        token: options.token,
+        installationId,
+        fetch: options.fetch,
+      })
+      : undefined;
+    if (launchTokenConfig) {
+      accounts = { ...accounts, launchTokenConfig };
+    }
+    const deployRequest = buildInstallDeployRequest(
+      compiledManifest,
+      options.serviceResolvers ?? [],
+      {
+        app,
+        accounts,
+        runtimeBaseUrl: options.runtimeBaseUrl,
+      },
+    );
     try {
       deployment = await postDeployment({
         endpoint: deployEndpoint,
@@ -2246,9 +2265,44 @@ async function patchInstallationStatus(input: {
   return { status: response.status, body };
 }
 
+async function fetchLaunchTokenConfig(input: {
+  readonly accountsUrl: string;
+  readonly token?: string;
+  readonly installationId: string;
+  readonly fetch?: typeof fetch;
+}): Promise<Record<string, unknown>> {
+  const response = await (input.fetch ?? fetch)(
+    `${normalizeBaseUrl(input.accountsUrl)}/v1/installations/${
+      encodeURIComponent(input.installationId)
+    }/launch-token`,
+    {
+      method: "GET",
+      headers: {
+        ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
+      },
+    },
+  );
+  const body = await readResponseBody(response);
+  if (response.status >= 400) {
+    throw new InstallApplyError(response.status, body);
+  }
+  return isRecord(body) ? body : {};
+}
+
+function appRequiresLaunchTokenConfig(app: InstallableApp): boolean {
+  return Object.values(app.bindings).some((binding) =>
+    binding.type === "install-launch-token@v1" && binding.required
+  );
+}
+
 function buildInstallDeployRequest(
   compiledManifest: CompiledInstallManifest | undefined,
   serviceResolvers: readonly InstallServiceResolverConfig[],
+  materialization?: {
+    readonly app: InstallableApp;
+    readonly accounts: AccountsInstallResponseSummary;
+    readonly runtimeBaseUrl?: string;
+  },
 ): { readonly mode: "apply"; readonly manifest: ManifestEnvelope } {
   if (!compiledManifest) {
     throw new Error("entry manifest is required for install apply deploy");
@@ -2260,10 +2314,134 @@ function buildInstallDeployRequest(
     serviceImportCount: serviceImports.length,
     serviceResolvers,
   });
+  if (materialization) {
+    applyAccountsRuntimeEnv({
+      manifest,
+      app: materialization.app,
+      accounts: materialization.accounts,
+      runtimeBaseUrl: materialization.runtimeBaseUrl,
+    });
+  }
   return {
     mode: "apply",
     manifest: manifest as unknown as ManifestEnvelope,
   };
+}
+
+function applyAccountsRuntimeEnv(input: {
+  manifest: Record<string, unknown>;
+  app: InstallableApp;
+  accounts: AccountsInstallResponseSummary;
+  runtimeBaseUrl?: string;
+}): void {
+  const env = accountsRuntimeEnv(input);
+  if (Object.keys(env).length === 0) return;
+
+  const resources = input.manifest.resources;
+  if (Array.isArray(resources)) {
+    for (const [index, resource] of resources.entries()) {
+      if (!isRecord(resource) || !isInstallRuntimeResource(resource)) continue;
+      if (!isRecord(resource.spec)) {
+        throw new Error(`manifest.resources[${index}].spec must be an object`);
+      }
+      injectMissingEnv(resource.spec, env, `manifest.resources[${index}].spec`);
+    }
+  }
+
+  const compute = input.manifest.compute;
+  if (isRecord(compute)) {
+    for (const [name, component] of Object.entries(compute)) {
+      if (!isRecord(component)) continue;
+      injectMissingEnv(component, env, `manifest.compute.${name}`);
+    }
+  }
+}
+
+function accountsRuntimeEnv(input: {
+  app: InstallableApp;
+  accounts: AccountsInstallResponseSummary;
+  runtimeBaseUrl?: string;
+}): Record<string, string> {
+  const env: Record<string, string> = {};
+  if (input.accounts.installationId) {
+    env.TAKOS_INSTALLATION_ID = input.accounts.installationId;
+  }
+  if (input.runtimeBaseUrl) {
+    env.BASE_URL = normalizeBaseUrl(input.runtimeBaseUrl);
+  }
+
+  if (appHasBindingType(input.app, "identity.oidc@v1")) {
+    const oidcClient = input.accounts.oidcClient;
+    if (oidcClient) {
+      const issuerUrl = stringProperty(oidcClient, "issuer_url", "issuerUrl");
+      const clientId = stringProperty(oidcClient, "client_id", "clientId");
+      const redirectUris = stringArrayProperty(
+        oidcClient,
+        "redirect_uris",
+        "redirectUris",
+      );
+      if (issuerUrl) env.OIDC_ISSUER_URL = issuerUrl;
+      if (clientId) env.OIDC_CLIENT_ID = clientId;
+      if (redirectUris[0]) env.OIDC_REDIRECT_URI = redirectUris[0];
+      if (input.accounts.oidcClientSecret) {
+        env.OIDC_CLIENT_SECRET = input.accounts.oidcClientSecret;
+      }
+    }
+  }
+
+  if (appHasBindingType(input.app, "install-launch-token@v1")) {
+    const launchEnv = isRecord(input.accounts.launchTokenConfig?.env)
+      ? input.accounts.launchTokenConfig.env
+      : {};
+    for (
+      const key of [
+        "INSTALL_LAUNCH_PUBLIC_KEY",
+        "INSTALL_LAUNCH_AUDIENCE",
+        "INSTALL_LAUNCH_ISSUER",
+      ]
+    ) {
+      const value = launchEnv[key];
+      if (typeof value === "string" && value.length > 0) env[key] = value;
+    }
+  }
+
+  return env;
+}
+
+function appHasBindingType(
+  app: InstallableApp,
+  type: InstallableAppBindingType,
+): boolean {
+  return Object.values(app.bindings).some((binding) => binding.type === type);
+}
+
+function isInstallRuntimeResource(resource: Record<string, unknown>): boolean {
+  const shape = resource.shape;
+  return typeof shape === "string" &&
+    (shape.startsWith("web-service@") || shape.startsWith("worker@"));
+}
+
+function injectMissingEnv(
+  target: Record<string, unknown>,
+  values: Record<string, string>,
+  path: string,
+): void {
+  const rawEnv = target.env;
+  if (rawEnv !== undefined && !isRecord(rawEnv)) {
+    throw new Error(`${path}.env must be an object`);
+  }
+  const env = rawEnv ?? {};
+  for (const [key, value] of Object.entries(values)) {
+    if (!hasEnvKey(env, key)) env[key] = value;
+  }
+  target.env = env;
+}
+
+function hasEnvKey(env: Record<string, unknown>, key: string): boolean {
+  const normalized = key.toUpperCase();
+  return Object.keys(env).some((existing) =>
+    existing.toUpperCase() === normalized
+  );
 }
 
 function readKernelManifestServiceImports(
@@ -2421,12 +2599,18 @@ function readAccountsInstallResponse(
     : isRecord(record.oidcClient)
     ? record.oidcClient
     : undefined;
+  const oidcClientSecret = stringProperty(
+    record,
+    "oidc_client_secret",
+    "oidcClientSecret",
+  );
   return {
     ...(readInstallationId(body)
       ? { installationId: readInstallationId(body) }
       : {}),
     bindings,
     ...(oidcClient ? { oidcClient } : {}),
+    ...(oidcClientSecret ? { oidcClientSecret } : {}),
   };
 }
 
@@ -2438,4 +2622,26 @@ function readInstallationId(body: unknown): string | undefined {
     : typeof installation.installation_id === "string"
     ? installation.installation_id
     : undefined;
+}
+
+function stringProperty(
+  record: Record<string, unknown>,
+  snakeKey: string,
+  camelKey: string,
+): string | undefined {
+  const value = record[snakeKey] ?? record[camelKey];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function stringArrayProperty(
+  record: Record<string, unknown>,
+  snakeKey: string,
+  camelKey: string,
+): readonly string[] {
+  const value = record[snakeKey] ?? record[camelKey];
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string =>
+      typeof entry === "string" && entry.length > 0
+    )
+    : [];
 }
