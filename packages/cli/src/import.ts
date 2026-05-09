@@ -71,14 +71,9 @@ export function parseImportArgs(
   });
   const positional = (flags._ ?? []).map((value) => String(value));
   if (positional.length !== 1) {
-    throw new Error("import requires exactly one export bundle JSON path");
+    throw new Error("import requires exactly one export bundle path");
   }
   const bundlePath = resolve(positional[0]);
-  if (bundlePath.endsWith(".tar.zst")) {
-    throw new Error(
-      "tar.zst bundle import is not implemented yet; pass a JSON export bundle",
-    );
-  }
   const accountsUrl = (flags["accounts-url"] as string | undefined) ??
     (flags.to as string | undefined) ?? env.get("TAKOSUMI_ACCOUNTS_URL");
   const token = (flags.token as string | undefined) ??
@@ -228,7 +223,7 @@ export class ImportApplyError extends Error {
 const IMPORT_HELP_TEXT = `takosumi-git import
 
 USAGE:
-  takosumi-git import <bundle.json> --to <accounts-url> --account-id <id> --space-id <id> --subject <tsub_...>
+  takosumi-git import <bundle.json|bundle.tar.zst> --to <accounts-url> --account-id <id> --space-id <id> --subject <tsub_...>
 
 OPTIONS:
   --to <url>                    target Takosumi Accounts URL
@@ -260,19 +255,44 @@ async function readExportBundleJson(
   path: string,
 ): Promise<Record<string, unknown>> {
   if (path.endsWith(".tar.zst")) {
-    throw new Error(
-      "tar.zst bundle import is not implemented yet; pass a JSON export bundle",
-    );
+    return parseExportBundleJsonText(await readTarZstBundleJson(path));
   }
-  let parsed: unknown;
+  return parseExportBundleJsonText(await Deno.readTextFile(path));
+}
+
+async function readTarZstBundleJson(path: string): Promise<string> {
+  const candidates = ["takos-export/bundle.json", "bundle.json"];
+  const errors: string[] = [];
+  for (const candidate of candidates) {
+    const output = await new Deno.Command("tar", {
+      args: [
+        "--use-compress-program=zstd",
+        "-xOf",
+        path,
+        candidate,
+      ],
+    }).output();
+    if (output.success) return new TextDecoder().decode(output.stdout);
+    const stderr = new TextDecoder().decode(output.stderr).trim();
+    if (stderr) errors.push(`${candidate}: ${stderr}`);
+  }
+  throw new Error(
+    `failed to read export bundle JSON from tar.zst: ${errors.join("; ")}`,
+  );
+}
+
+function parseExportBundleJsonText(text: string): Record<string, unknown> {
   try {
-    parsed = JSON.parse(await Deno.readTextFile(path));
+    return parseExportBundleJson(JSON.parse(text));
   } catch (error) {
     if (error instanceof SyntaxError) {
       throw new Error(`invalid export bundle JSON: ${error.message}`);
     }
     throw error;
   }
+}
+
+function parseExportBundleJson(parsed: unknown): Record<string, unknown> {
   if (
     !isRecord(parsed) ||
     parsed.kind !== ACCOUNTS_INSTALLATION_EXPORT_BUNDLE_KIND

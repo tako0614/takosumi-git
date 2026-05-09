@@ -82,7 +82,8 @@ INSTALL OPTIONS:
   --json                       print preview JSON
 
 IMPORT OPTIONS:
-  import <bundle.json>         import a JSON AppInstallation export bundle
+  import <bundle.json|bundle.tar.zst>
+                               import an AppInstallation export bundle
   --to <url>                   target Takosumi Accounts URL
   --accounts-url <url>         alias for --to
   --account-id <id>            target account id

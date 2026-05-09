@@ -51,8 +51,9 @@ via `POST /v1/deployments`. `install` previews `.takosumi/app.yml`, creates an
 AppInstallation in Takosumi Accounts, can deploy the compiled manifest to a
 kernel, injects materialized runtime env, and patches installation status.
 `upgrade` / `rollback` preview or apply source revision changes through the
-Accounts ledger. `import` reads a JSON AppInstallation export bundle and posts
-it to Takosumi Accounts. `materialize` requests shared-cell to dedicated runtime
+Accounts ledger. `import` reads a JSON AppInstallation export bundle or a
+`tar.zst` archive containing `takos-export/bundle.json` and posts it to Takosumi
+Accounts. `materialize` requests shared-cell to dedicated runtime
 materialization, and `export` requests a self-host bundle operation through
 Takosumi Accounts. `history` lists manifest commits and renders per-resource
 semantic diffs. `serve` exposes GitHub / GitLab / Gitea webhook routes with

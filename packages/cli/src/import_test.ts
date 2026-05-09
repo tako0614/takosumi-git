@@ -1,9 +1,4 @@
-import {
-  assertEquals,
-  assertRejects,
-  assertStringIncludes,
-  assertThrows,
-} from "@std/assert";
+import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { applyImport, ImportApplyError, parseImportArgs } from "./import.ts";
 
@@ -98,23 +93,20 @@ Deno.test("parseImportArgs reads required options from env", () => {
   assertEquals(parsed.token, "accounts-token");
 });
 
-Deno.test("parseImportArgs rejects tar.zst until archive parser exists", () => {
-  assertThrows(
-    () =>
-      parseImportArgs([
-        "takos-export.tar.zst",
-        "--to",
-        "https://accounts.target.test",
-        "--account-id",
-        "acct_target",
-        "--space-id",
-        "space_target",
-        "--subject",
-        "tsub_target",
-      ]),
-    Error,
-    "tar.zst bundle import is not implemented yet",
-  );
+Deno.test("parseImportArgs accepts tar.zst export bundle path", () => {
+  const parsed = parseImportArgs([
+    "takos-export.tar.zst",
+    "--to",
+    "https://accounts.target.test",
+    "--account-id",
+    "acct_target",
+    "--space-id",
+    "space_target",
+    "--subject",
+    "tsub_target",
+  ]);
+
+  assertStringIncludes(parsed.bundlePath, "takos-export.tar.zst");
 });
 
 Deno.test("applyImport posts JSON export bundle to Accounts import API", async () => {
@@ -191,6 +183,71 @@ Deno.test("applyImport posts JSON export bundle to Accounts import API", async (
   }
 });
 
+Deno.test("applyImport reads bundle JSON from tar.zst archive", async () => {
+  const root = await Deno.makeTempDir({
+    prefix: "takosumi-git-import-",
+  });
+  const requests: Request[] = [];
+  try {
+    const sourceRoot = join(root, "src");
+    await Deno.mkdir(join(sourceRoot, "takos-export"), { recursive: true });
+    await Deno.writeTextFile(
+      join(sourceRoot, "takos-export", "bundle.json"),
+      `${JSON.stringify(EXPORT_BUNDLE, null, 2)}\n`,
+    );
+    await Deno.writeTextFile(
+      join(sourceRoot, "takos-export", "docs-restore-placeholder.txt"),
+      "restore docs placeholder\n",
+    );
+    const bundlePath = join(root, "takos-export.tar.zst");
+    await assertCommandOk(
+      new Deno.Command("tar", {
+        args: [
+          "--use-compress-program=zstd",
+          "-cf",
+          bundlePath,
+          "-C",
+          sourceRoot,
+          "takos-export",
+        ],
+      }),
+    );
+
+    const result = await applyImport({
+      bundlePath,
+      accountsUrl: "https://accounts.target.test/",
+      accountId: "acct_target",
+      spaceId: "space_target",
+      createdBySubject: "tsub_target",
+      json: true,
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: {
+            id: "inst_target",
+          },
+          import_plan: {
+            target_issuer: "https://accounts.target.test",
+          },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(result.accounts.installationId, "inst_target");
+    const body = await requests[0].json();
+    assertEquals(
+      body.bundle.kind,
+      "takosumi.accounts.installation-export-bundle@v1",
+    );
+    assertEquals(
+      body.bundle.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("applyImport rejects unsupported bundle kind", async () => {
   const root = await Deno.makeTempDir({
     prefix: "takosumi-git-import-",
@@ -219,6 +276,13 @@ Deno.test("applyImport rejects unsupported bundle kind", async () => {
     await Deno.remove(root, { recursive: true });
   }
 });
+
+async function assertCommandOk(command: Deno.Command): Promise<void> {
+  const output = await command.output();
+  if (!output.success) {
+    throw new Error(new TextDecoder().decode(output.stderr));
+  }
+}
 
 Deno.test("applyImport surfaces Accounts import errors", async () => {
   const root = await Deno.makeTempDir({

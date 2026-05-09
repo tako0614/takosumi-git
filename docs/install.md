@@ -310,7 +310,8 @@ Takosumi Accounts updates the AppInstallation source pin and appends an
 thin clients for the Takosumi Accounts lifecycle API. Materialize/export request
 the operation and return the operation tracking URL; provider workers complete
 the runtime move or bundle creation asynchronously. Import reads a JSON
-AppInstallation export bundle and creates the target AppInstallation through
+AppInstallation export bundle, or a `tar.zst` archive containing
+`takos-export/bundle.json`, and creates the target AppInstallation through
 Accounts.
 
 ```bash
@@ -328,7 +329,7 @@ takosumi-git export inst_01J... \
   --encryption-method age \
   --recipient age1...
 
-takosumi-git import ./takos-export.bundle.json \
+takosumi-git import ./takos-export.tar.zst \
   --to http://127.0.0.1:8787 \
   --account-id acct_self_host \
   --space-id space_self_host \
@@ -345,7 +346,7 @@ POST /v1/installations/import
 ```
 
 Materialize and export send an `Idempotency-Key` header. Pass
-`--idempotency-key` to reuse a known key across retries. JSON import accepts the
-same header for future-compatible retries. Direct `tar.zst` archive parsing is
-not implemented in the CLI yet; pass the JSON
-`takosumi.accounts.installation-export-bundle@v1` payload.
+`--idempotency-key` to reuse a known key across retries. Import accepts the same
+header for future-compatible retries. Archive import reads the canonical
+`takosumi.accounts.installation-export-bundle@v1` payload from
+`takos-export/bundle.json` inside the `tar.zst`.
