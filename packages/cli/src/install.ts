@@ -2185,6 +2185,7 @@ export async function applyInstall(
     if (launchTokenConfig) {
       accounts = { ...accounts, launchTokenConfig };
     }
+    assertRequiredLaunchTokenConfig(app, accounts);
     assertRequiredProviderBindingsMaterialized(app, accounts);
     const deployRequest = buildInstallDeployRequest(
       compiledManifest,
@@ -2296,6 +2297,46 @@ function appRequiresLaunchTokenConfig(app: InstallableApp): boolean {
   return Object.values(app.bindings).some((binding) =>
     binding.type === "install-launch-token@v1" && binding.required
   );
+}
+
+function assertRequiredLaunchTokenConfig(
+  app: InstallableApp,
+  accounts: AccountsInstallResponseSummary,
+): void {
+  const missing: string[] = [];
+  for (const [name, binding] of Object.entries(app.bindings)) {
+    if (binding.type !== "install-launch-token@v1" || !binding.required) {
+      continue;
+    }
+    const record = accounts.bindings.find((entry) =>
+      stringProperty(entry, "name", "name") === name
+    );
+    const configRef = record
+      ? stringProperty(record, "config_ref", "configRef")
+      : undefined;
+    if (!configRef || configRef.startsWith("takosumi-git://")) {
+      missing.push(`${name}:install-launch-token@v1:configRef`);
+    }
+    const launchEnv = isRecord(accounts.launchTokenConfig?.env)
+      ? accounts.launchTokenConfig.env
+      : {};
+    for (
+      const envKey of [
+        "INSTALL_LAUNCH_PUBLIC_KEY",
+        "INSTALL_LAUNCH_AUDIENCE",
+        "INSTALL_LAUNCH_ISSUER",
+      ]
+    ) {
+      if (!hasEnvKey(launchEnv, envKey)) {
+        missing.push(`${name}:install-launch-token@v1:${envKey}`);
+      }
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `required launch token config is missing: ${missing.join(", ")}`,
+    );
+  }
 }
 
 function assertRequiredProviderBindingsMaterialized(

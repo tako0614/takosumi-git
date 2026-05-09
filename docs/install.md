@@ -209,7 +209,10 @@ If a required provider-backed binding (`database.postgres@v1`,
 `object-store.s3-compatible@v1`, `domain.http@v1`, or `deploy-intent.gitops@v1`)
 still has its pending `takosumi-git://...` ref when a kernel deploy is
 requested, `install apply` fails before `POST /v1/deployments`. For bindings
-with default env, the required `binding_env` keys must also be present.
+with default env, the required `binding_env` keys must also be present. Required
+`install-launch-token@v1` bindings likewise require an Accounts-owned
+launch-token ref plus all `INSTALL_LAUNCH_*` values from the public config
+endpoint before deploy.
 
 ## Service Imports
 
