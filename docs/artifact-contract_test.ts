@@ -59,6 +59,7 @@ Deno.test("artifact contract is linked from top-level docs", async () => {
   assert.ok(readme.includes("docs/artifact-contract.md"));
   assert.ok(readme.includes("docs/workflow-ref.md"));
   assert.ok(readme.includes("docs/quickstart.md"));
+  assert.ok(readme.includes("docs/install.md"));
   assert.ok(readme.includes("docs/history.md"));
   assert.ok(readme.includes("docs/serve.md"));
   assert.ok(agents.includes("docs/artifact-contract.md"));
@@ -76,6 +77,9 @@ Deno.test("quickstart and workflow-ref docs pin the project convention", async (
   for (
     const snippet of [
       "takosumi-git init",
+      ".takosumi/app.yml",
+      "takosumi-git install preview",
+      "Install Preview and Apply",
       "takosumi-git/packages/cli/src/main.ts push --dry-run",
       "POST /v1/deployments",
       ".takosumi/manifest.yml",

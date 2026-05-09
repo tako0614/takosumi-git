@@ -25,8 +25,11 @@ takosumi-git/
 envelope を `.takosumi/manifest.yml` から読み、`resources[i].workflowRef`
 で参照される workflow を実行し、artifact URI を該当 entry の `spec.image` field
 に embed して `workflowRef` を strip した上で takosumi の `POST /v1/deployments`
-に投下する)。`history` は manifest git history と resource semantic diff を表示
-する。`serve` (webhook receiver) は follow-up commit で実装する stub のまま。
+に投下する)。`install` は `.takosumi/app.yml` を preview/apply し、Takosumi
+Accounts AppInstallation 作成、任意の kernel deploy、status patch まで扱う。
+`history` は manifest git history と resource semantic diff を表示する。`serve`
+は GitHub / GitLab / Gitea webhook receiver と install preview/apply HTTP API を
+提供する。
 
 ## 基本方針
 
@@ -51,14 +54,14 @@ envelope を `.takosumi/manifest.yml` から読み、`resources[i].workflowRef`
 
 ## JSR publish layout (planned)
 
-| Package                                 | Version | 内容                                                                   |
-| --------------------------------------- | ------- | ---------------------------------------------------------------------- |
-| `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                            |
-| `@takos/takosumi-git-cli`               | 0.3.0   | CLI (`takosumi-git init` / `push` / `history` 実装済、`serve` は stub) |
-| `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)               |
-| `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)            |
-| `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization                       |
-| `@takos/takosumi-git`                   | 0.0.1   | umbrella (上記を re-export)                                            |
+| Package                                 | Version | 内容                                                                                          |
+| --------------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `@takos/takosumi-git-deploy-client`     | 0.0.1   | takosumi `POST /v1/deployments` HTTP client                                                   |
+| `@takos/takosumi-git-cli`               | 0.3.0   | CLI (`takosumi-git init` / `push` / `install` / `upgrade` / `rollback` / `serve` / `history`) |
+| `@takos/takosumi-git-workflow-contract` | 0.0.1   | workflow YAML / event 型契約 (`ComputeWorkflowRef` 含む)                                      |
+| `@takos/takosumi-git-workflow-runner`   | 0.0.1   | workflow execution (StepExecutor / ArtifactResolver 注入式)                                   |
+| `@takos/takosumi-git-source`            | 0.0.1   | git push / webhook → WorkflowEvent normalization                                              |
+| `@takos/takosumi-git`                   | 0.0.1   | umbrella (上記を re-export)                                                                   |
 
 ## .takosumi/ project convention
 
@@ -108,7 +111,7 @@ takosumi-git install preview          # .takosumi/app.yml から install preview
 takosumi-git install apply            # Takosumi Accounts に AppInstallation を作成
 takosumi-git upgrade <id> --ref <ref> # AppInstallation の source revision を preview / apply
 takosumi-git rollback <id> --to <ref> # AppInstallation の previous ref への rollback を preview / apply
-takosumi-git serve --webhook          # git webhook を受け、自動で push 実行 (stub)
+takosumi-git serve --webhook          # git webhook と install preview/apply API を受ける
 takosumi-git history                  # git history = manifest version 履歴を表示
 ```
 

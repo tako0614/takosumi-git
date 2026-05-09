@@ -6,7 +6,8 @@ This quickstart uses the source checkout. After the JSR publish step lands, the
 same flow should work through
 `deno install -gA -n takosumi-git
 jsr:@takos/takosumi-git-cli`. The installed
-command equivalents are `takosumi-git init` and `takosumi-git push`.
+command equivalents are `takosumi-git init`, `takosumi-git push`, and
+`takosumi-git install`.
 
 ## 1. Scaffold
 
@@ -20,6 +21,7 @@ This writes:
 
 ```text
 .takosumi/
+├── app.yml
 ├── manifest.yml
 └── workflows/
     └── build.yml
@@ -28,7 +30,20 @@ This writes:
 The Takosumi kernel does not read this directory. It is a takosumi-git project
 convention.
 
-## 2. Edit the Manifest
+## 2. Edit Install Metadata
+
+Open `.takosumi/app.yml` and set publisher metadata, source pins, runtime modes,
+bindings, and requested permissions. `takosumi-git install preview` reads this
+file without mutating Accounts or the kernel:
+
+```bash
+deno run -A /path/to/takosumi-git/packages/cli/src/main.ts install preview --json
+```
+
+See [Install Preview and Apply](./install.md) for the InstallableApp v1 contract
+and Accounts apply flow.
+
+## 3. Edit the Manifest
 
 Open `.takosumi/manifest.yml` and set the resource shape, provider, and spec.
 Resources that need a build output use `resources[i].workflowRef`:
@@ -48,7 +63,7 @@ resources:
 
 See [WorkflowRef](./workflow-ref.md) for the field contract.
 
-## 3. Make the Workflow Print an Artifact URI Marker
+## 4. Make the Workflow Print an Artifact URI Marker
 
 Open `.takosumi/workflows/build.yml`. Artifact URI v1 is the default contract:
 the successful workflow must print `TAKOSUMI_ARTIFACT=<uri>` to stdout.
@@ -70,7 +85,7 @@ jobs:
 See [Artifact URI Contract](./artifact-contract.md) for v1 marker, legacy v0,
 and failure semantics.
 
-## 4. Dry Run
+## 5. Dry Run
 
 Dry-run executes workflows, strips `workflowRef`, writes the resolved URI into
 `resources[i].spec.image` by default, or into `workflowRef.target` when set, and
@@ -80,7 +95,7 @@ prints the cleaned manifest without sending it to the kernel:
 deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push --dry-run
 ```
 
-## 5. Apply
+## 6. Apply
 
 When the manifest looks correct, submit it to a Takosumi kernel:
 
