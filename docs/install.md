@@ -197,6 +197,17 @@ The same values can be supplied through `TAKOSUMI_SERVICE_RESOLVER_URL` and
 `TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY`. The kernel receives only the compiled
 manifest; `.takosumi/app.yml` itself remains installer metadata.
 
+## Installer Placeholders
+
+Compiled manifests must not carry installer-only placeholders. If
+`.takosumi/manifest.yml` still contains `${params.*}`, `${installation.*}`,
+`${artifacts.*}`, `${bindings.*}`, `${secrets.*}`, or legacy `${refs.*}`
+references after service-import compilation, `takosumi-git install apply` and
+`takosumi-git push` fail before any Accounts or kernel request. Kernel-bound
+service import placeholders such as
+`${imports.account-auth.endpoints.oidc-issuer.url}` are allowed to remain
+because the kernel public deploy route resolves them through `serviceResolvers`.
+
 ## Commit Pins
 
 `source.commit` in `.takosumi/app.yml` is accepted when present. When the commit

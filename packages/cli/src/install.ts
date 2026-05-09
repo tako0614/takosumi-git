@@ -252,6 +252,8 @@ const endpointRolePattern = /^[a-z][a-z0-9-]*$/;
 const ttlDurationPattern = /^\d+[smhd]$/;
 const pathPattern = /^\/[^?#]{0,199}$/;
 const fullCommitPattern = /^[0-9a-f]{40}$/;
+const installerPlaceholderPattern =
+  /\$\{(?:params|installation|artifacts|bindings|secrets|refs)\.[^}]+}/;
 const semverTagPattern = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const releaseTagPattern = /^release[/-][0-9][0-9A-Za-z._-]*$/;
 const mutableRefs = new Set([
@@ -1410,11 +1412,39 @@ export function compileInstallManifest(
   }
   const serviceImports = buildKernelServiceImports(app);
   const manifest = mergeKernelServiceImports(parsed, serviceImports);
+  assertNoInstallerPlaceholders(manifest);
   return {
     manifest,
     digest: digestJson(manifest),
     serviceImports,
   };
+}
+
+function assertNoInstallerPlaceholders(
+  value: unknown,
+  path = "$",
+): void {
+  if (typeof value === "string") {
+    const match = value.match(installerPlaceholderPattern);
+    if (match) {
+      throw new Error(
+        `entry manifest contains unresolved installer placeholder at ${path}: ${
+          match[0]
+        }`,
+      );
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) =>
+      assertNoInstallerPlaceholders(entry, `${path}[${index}]`)
+    );
+    return;
+  }
+  if (!isRecord(value)) return;
+  for (const [key, entry] of Object.entries(value)) {
+    assertNoInstallerPlaceholders(entry, `${path}.${key}`);
+  }
 }
 
 function mergeKernelServiceImports(

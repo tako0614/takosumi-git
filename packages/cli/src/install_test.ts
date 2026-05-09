@@ -233,6 +233,52 @@ resources: []`,
   );
 });
 
+Deno.test("compileInstallManifest rejects unresolved installer placeholders", () => {
+  const app = parseInstallableAppYaml(VALID_APP_YML);
+
+  assertThrows(
+    () =>
+      compileInstallManifest(
+        app,
+        MANIFEST_YML.replace(
+          "resources: []",
+          `resources:
+  - name: api
+    shape: web-service@v1
+    provider: "@takos/cloudflare-container"
+    spec:
+      env:
+        OIDC_CLIENT_ID: "\${bindings.auth.clientId}"
+        OIDC_CLIENT_SECRET: "\${secrets.auth.clientSecret}"`,
+        ),
+      ),
+    Error,
+    "unresolved installer placeholder",
+  );
+});
+
+Deno.test("compileInstallManifest preserves kernel import placeholders", () => {
+  const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
+  const compiled = compileInstallManifest(
+    app,
+    MANIFEST_YML.replace(
+      "resources: []",
+      `resources:
+  - name: api
+    shape: web-service@v1
+    provider: "@takos/cloudflare-container"
+    spec:
+      upstream: "\${imports.account-auth.endpoints.oidc-issuer.url}"`,
+    ),
+  );
+
+  const resources = compiled.manifest.resources as Record<string, unknown>[];
+  assertEquals(
+    (resources[0].spec as Record<string, unknown>).upstream,
+    "${imports.account-auth.endpoints.oidc-issuer.url}",
+  );
+});
+
 Deno.test("parseInstallableAppYaml rejects unknown fields and mutable refs", () => {
   const error = assertThrows(
     () =>
