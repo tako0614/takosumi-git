@@ -1,0 +1,54 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish JSR packages instead of running dry-run only"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: takosumi-git-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DENO_DIR: ${{ github.workspace }}/.deno-cache
+
+jobs:
+  jsr:
+    name: JSR packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Cache Deno deps
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.DENO_DIR }}
+          key: ${{ runner.os }}-deno-takosumi-git-release-${{ hashFiles('deno.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-deno-takosumi-git-release-
+
+      - run: deno install
+      - run: deno task fmt:check
+      - run: deno task lint
+      - run: deno task check
+      - run: deno task test
+      - run: deno task publish:dry-run
+
+      - name: Publish JSR packages
+        if: github.event_name == 'push' || inputs.publish == true
+        run: deno task publish:jsr

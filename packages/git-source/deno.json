@@ -4,7 +4,7 @@
   "license": "MIT",
   "exports": "./src/mod.ts",
   "imports": {
-    "@takos/takosumi-git-workflow-contract": "../workflow-contract/src/mod.ts"
+    "@takos/takosumi-git-workflow-contract": "jsr:@takos/takosumi-git-workflow-contract@^0.0.1"
   },
   "tasks": {
     "check": "deno check src/mod.ts",

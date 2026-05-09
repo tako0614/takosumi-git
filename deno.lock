@@ -34,7 +34,11 @@
     "members": {
       "packages/all": {
         "dependencies": [
-          "jsr:@std/assert@1"
+          "jsr:@std/assert@1",
+          "jsr:@takos/takosumi-git-deploy-client@^0.0.1",
+          "jsr:@takos/takosumi-git-source@^0.0.1",
+          "jsr:@takos/takosumi-git-workflow-contract@^0.0.1",
+          "jsr:@takos/takosumi-git-workflow-runner@^0.0.1"
         ]
       },
       "packages/cli": {
@@ -42,7 +46,21 @@
           "jsr:@std/assert@1",
           "jsr:@std/cli@1",
           "jsr:@std/path@1",
-          "jsr:@std/yaml@1"
+          "jsr:@std/yaml@1",
+          "jsr:@takos/takosumi-git-deploy-client@^0.0.1",
+          "jsr:@takos/takosumi-git-source@^0.0.1",
+          "jsr:@takos/takosumi-git-workflow-contract@^0.0.1",
+          "jsr:@takos/takosumi-git-workflow-runner@^0.0.1"
+        ]
+      },
+      "packages/git-source": {
+        "dependencies": [
+          "jsr:@takos/takosumi-git-workflow-contract@^0.0.1"
+        ]
+      },
+      "packages/workflow-runner": {
+        "dependencies": [
+          "jsr:@takos/takosumi-git-workflow-contract@^0.0.1"
         ]
       }
     }

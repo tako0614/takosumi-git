@@ -8,8 +8,10 @@
     "./packages/all"
   ],
   "tasks": {
-    "check": "deno check packages/workflow-contract/src/mod.ts packages/workflow-runner/src/mod.ts packages/git-source/src/mod.ts packages/deploy-client/src/mod.ts packages/cli/src/main.ts packages/all/src/mod.ts",
+    "check": "deno check packages/workflow-contract/src/mod.ts packages/workflow-runner/src/mod.ts packages/git-source/src/mod.ts packages/deploy-client/src/mod.ts packages/cli/src/main.ts packages/all/src/mod.ts scripts/jsr-publish.ts",
     "test": "deno test --allow-all",
+    "publish:dry-run": "deno run --allow-run --allow-read scripts/jsr-publish.ts",
+    "publish:jsr": "deno run --allow-run --allow-read scripts/jsr-publish.ts --publish",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
     "lint": "deno lint"

@@ -45,9 +45,10 @@ substitutes the resolved artifact URI into that resource entry's `spec.image`
 field, strips the private `workflowRef` extension, attaches resource-level
 provenance metadata plus a top-level deployment provenance chain, and posts the
 cleaned manifest to a takosumi kernel via `POST /v1/deployments`. `history`
-lists manifest commits and renders per-resource semantic diffs. `serve` (webhook
-receiver) remains a stub. See [AGENTS.md](./AGENTS.md) for package layout and
-design boundaries.
+lists manifest commits and renders per-resource semantic diffs. `serve` exposes
+GitHub / GitLab / Gitea webhook routes with signature verification, rate
+limiting, delivery dedup, queue draining, and push dispatch. See
+[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
 
 ## Docs
 
@@ -56,3 +57,12 @@ design boundaries.
 - [Artifact URI Contract](./docs/artifact-contract.md)
 - [History](./docs/history.md)
 - [Serve](./docs/serve.md)
+
+## Release
+
+Semver tags (`v*.*.*`) run `.github/workflows/release.yml`. The workflow checks
+the workspace, runs tests, performs a JSR dry-run, then publishes the
+takosumi-git JSR package set with GitHub OIDC. Manual workflow runs stay dry-run
+unless the explicit `publish` input is set. Tags are repository-level release
+markers; every publishable package version must already be bumped to the
+intended unpublished JSR version before tagging.
