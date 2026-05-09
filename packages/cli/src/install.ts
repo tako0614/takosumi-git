@@ -1783,6 +1783,7 @@ function installWorkflowSandboxEnv(): Record<string, string> {
     PATH: "/usr/local/bin:/usr/bin:/bin",
   };
   for (const key of workflowEnvAllowlist) {
+    if (key === "PATH") continue;
     const value = Deno.env.get(key);
     if (value !== undefined) env[key] = value;
   }

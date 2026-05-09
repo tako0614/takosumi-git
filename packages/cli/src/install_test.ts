@@ -156,6 +156,29 @@ jobs:
       name: image
 `;
 
+const SECRET_PROBE_WORKFLOW_FILE_YML = `version: "0"
+jobs:
+  - name: image
+    steps:
+      - name: probe-env
+        run: |
+          if [ -n "$TAKOS_TOKEN$TAKOSUMI_DEPLOY_TOKEN$OIDC_CLIENT_SECRET$DATABASE_URL" ]; then
+            echo "leaked:$TAKOS_TOKEN:$TAKOSUMI_DEPLOY_TOKEN:$OIDC_CLIENT_SECRET:$DATABASE_URL"
+            exit 42
+          fi
+          echo "isolated"
+          echo "TAKOSUMI_ARTIFACT=ghcr.io/example/workflow@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    artifact:
+      name: image
+`;
+
+function restoreEnv(values: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) Deno.env.delete(key);
+    else Deno.env.set(key, value);
+  }
+}
+
 Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   const app = parseInstallableAppYaml(VALID_APP_YML);
 
@@ -1039,6 +1062,93 @@ Deno.test("applyInstall compiles workflowRef before kernel deploy", async () => 
     );
     assert(!("workflowRef" in resource));
   } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("applyInstall default workflow executor does not inherit runtime secrets", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-install-sandbox-",
+  });
+  const previous = {
+    TAKOS_TOKEN: Deno.env.get("TAKOS_TOKEN"),
+    TAKOSUMI_DEPLOY_TOKEN: Deno.env.get("TAKOSUMI_DEPLOY_TOKEN"),
+    OIDC_CLIENT_SECRET: Deno.env.get("OIDC_CLIENT_SECRET"),
+    DATABASE_URL: Deno.env.get("DATABASE_URL"),
+  };
+  const requests: Request[] = [];
+  try {
+    Deno.env.set("TAKOS_TOKEN", "takos-token-secret");
+    Deno.env.set("TAKOSUMI_DEPLOY_TOKEN", "deploy-token-secret");
+    Deno.env.set("OIDC_CLIENT_SECRET", "oidc-client-secret");
+    Deno.env.set("DATABASE_URL", "postgres://secret@example/db");
+    await Deno.mkdir(join(checkoutRoot, ".takosumi", "workflows"), {
+      recursive: true,
+    });
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      WORKFLOW_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      WORKFLOW_MANIFEST_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "workflows", "build.yml"),
+      SECRET_PROBE_WORKFLOW_FILE_YML,
+    );
+
+    const result = await applyInstall({
+      subcommand: "apply",
+      cwd: "/unused",
+      appPath: "/unused/.takosumi/app.yml",
+      appPathSpec: ".takosumi/app.yml",
+      manifestPathSpec: ".takosumi/manifest.yml",
+      json: true,
+      sourceGitUrl: "https://github.com/example/workflow",
+      sourceRef: "v1.2.3",
+      accountsUrl: "http://accounts.example",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      endpoint: "http://kernel.example",
+      deployToken: "deploy-secret",
+      checkoutSource: () =>
+        Promise.resolve({
+          root: checkoutRoot,
+          commit: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+          cleanup: () => Promise.resolve(),
+        }),
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Promise.resolve(Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          }));
+        }
+        if (url.includes("/status")) {
+          return Promise.resolve(Response.json({
+            installation: { id: "inst_sandbox", status: "ready" },
+          }));
+        }
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_sandbox" },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(result.accounts.installationId, "inst_sandbox");
+    assertEquals(result.deployment?.status, 200);
+    const deployBody = await requests[1].json();
+    const resource = deployBody.manifest.resources[0];
+    assertEquals(
+      resource.spec.image,
+      "ghcr.io/example/workflow@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    );
+  } finally {
+    restoreEnv(previous);
     await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
   }
 });
