@@ -18,12 +18,14 @@ takosumi-git serve \
 
 The server listens on `0.0.0.0:8788` by default and exposes:
 
-| method | path               | provider |
-| ------ | ------------------ | -------- |
-| POST   | `/webhooks/github` | GitHub   |
-| POST   | `/webhooks/gitlab` | GitLab   |
-| POST   | `/webhooks/gitea`  | Gitea    |
-| GET    | `/health`          | health   |
+| method | path                  | provider / purpose      |
+| ------ | --------------------- | ----------------------- |
+| POST   | `/webhooks/github`    | GitHub push webhook     |
+| POST   | `/webhooks/gitlab`    | GitLab push webhook     |
+| POST   | `/webhooks/gitea`     | Gitea push webhook      |
+| POST   | `/v1/install/preview` | non-mutating app review |
+| POST   | `/v1/install/apply`   | mutating app install    |
+| GET    | `/health`             | health                  |
 
 ## Signature Verification
 
@@ -45,3 +47,43 @@ the same process.
 
 Rate limiting is also in memory and defaults to 60 requests per 60 seconds per
 `X-Forwarded-For` key.
+
+## Install API
+
+`POST /v1/install/preview` accepts the same preview body documented in
+[Install Preview and Apply](./install.md). It is non-mutating and does not need
+a bearer token.
+
+`POST /v1/install/apply` runs the existing `install apply` pipeline from a Git
+source: checkout, preview/compile, AppInstallation creation, optional kernel
+deploy, and status patch. Because it mutates Accounts and the kernel, callers
+must send:
+
+```text
+Authorization: Bearer <serve-token>
+```
+
+The serve process must be configured with Accounts credentials:
+
+```bash
+takosumi-git serve \
+  --endpoint "$TAKOSUMI_ENDPOINT" \
+  --token "$TAKOSUMI_TOKEN" \
+  --webhook-secret "$TAKOSUMI_GIT_WEBHOOK_SECRET" \
+  --accounts-url "$TAKOSUMI_ACCOUNTS_URL" \
+  --accounts-token "$TAKOSUMI_ACCOUNTS_TOKEN"
+```
+
+Body fields:
+
+```json
+{
+  "gitUrl": "https://github.com/example/hello",
+  "ref": "v1.2.3",
+  "accountId": "acct_...",
+  "spaceId": "space_...",
+  "subject": "tsub_..."
+}
+```
+
+The response kind is `takosumi-git.install-apply@v1`.

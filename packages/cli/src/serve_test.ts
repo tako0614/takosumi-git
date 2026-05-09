@@ -270,6 +270,132 @@ Deno.test("serve preview API accepts Git URL source", async () => {
   }
 });
 
+Deno.test("serve apply API runs install apply pipeline from Git source", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-serve-apply-",
+  });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi"));
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      'apiVersion: "1.0"\nkind: Manifest\nresources: []\n',
+    );
+    const handler = createServeHandler({
+      ...baseOptions(),
+      endpoint: "http://kernel.example",
+      token: "serve-token",
+      accountsUrl: "http://accounts.example",
+      accountsToken: "accounts-token",
+      deployToken: "deploy-token",
+      accountId: "acct_default",
+      spaceId: "space_default",
+      subject: "tsub_default",
+      installPreviewCheckoutSource: (request) => {
+        assertEquals(request, {
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+        });
+        return Promise.resolve({
+          root: checkoutRoot,
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          cleanup: () => Promise.resolve(),
+        });
+      },
+      installApplyFetch: (input, init) => {
+        requests.push(new Request(input, init));
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Promise.resolve(Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          }));
+        }
+        if (url.includes("/status")) {
+          return Promise.resolve(Response.json({
+            installation: { id: "inst_1", status: "ready" },
+          }));
+        }
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1" },
+        }, { status: 202 }));
+      },
+    });
+
+    const response = await handler(
+      new Request("http://localhost/v1/install/apply", {
+        method: "POST",
+        headers: {
+          "authorization": "Bearer serve-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          subject: "tsub_owner",
+        }),
+      }),
+    );
+
+    assertEquals(response.status, 202);
+    const body = await response.json();
+    assertEquals(body.kind, "takosumi-git.install-apply@v1");
+    assertEquals(body.response.status, 202);
+    assertEquals(requests.length, 3);
+    assertEquals(requests[0].url, "http://accounts.example/v1/installations");
+    assertEquals(
+      requests[0].headers.get("authorization"),
+      "Bearer accounts-token",
+    );
+    const installBody = await requests[0].json();
+    assertEquals(installBody.accountId, "acct_1");
+    assertEquals(installBody.spaceId, "space_1");
+    assertEquals(installBody.createdBySubject, "tsub_owner");
+    assertEquals(
+      installBody.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+    assertEquals(requests[1].url, "http://kernel.example/v1/deployments");
+    assertEquals(
+      requests[1].headers.get("authorization"),
+      "Bearer deploy-token",
+    );
+    assertEquals(
+      requests[2].url,
+      "http://accounts.example/v1/installations/inst_1/status",
+    );
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test("serve apply API requires bearer token", async () => {
+  const handler = createServeHandler({
+    ...baseOptions(),
+    token: "serve-token",
+    accountsUrl: "http://accounts.example",
+    accountsToken: "accounts-token",
+  });
+  const response = await handler(
+    new Request("http://localhost/v1/install/apply", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        gitUrl: "https://github.com/example/hello",
+        ref: "v1.2.3",
+      }),
+    }),
+  );
+
+  assertEquals(response.status, 401);
+});
+
 Deno.test("serve preview API returns validation issues", async () => {
   const handler = createServeHandler(baseOptions());
   const response = await handler(
@@ -294,6 +420,13 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
         TAKOSUMI_ENDPOINT: "https://kernel.example",
         TAKOSUMI_TOKEN: "token",
         TAKOSUMI_GIT_WEBHOOK_SECRET: "secret",
+        TAKOSUMI_ACCOUNTS_URL: "https://accounts.example",
+        TAKOSUMI_ACCOUNTS_TOKEN: "accounts-token",
+        TAKOS_ACCOUNT_ID: "acct_1",
+        TAKOS_SPACE_ID: "space_1",
+        TAKOSUMI_SUBJECT: "tsub_owner",
+        TAKOSUMI_RUNTIME_BASE_URL: "https://app.example",
+        TAKOSUMI_DEPLOY_TOKEN: "deploy-token",
         TAKOSUMI_SERVICE_RESOLVER_URL:
           "https://anchor.example.test/v1/services",
         TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY: "pubkey",
@@ -307,6 +440,13 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
   assertEquals(parsed.token, "token");
   assertEquals(parsed.webhookSecret, "secret");
   assertEquals(parsed.artifactContract, "v1");
+  assertEquals(parsed.accountsUrl, "https://accounts.example");
+  assertEquals(parsed.accountsToken, "accounts-token");
+  assertEquals(parsed.accountId, "acct_1");
+  assertEquals(parsed.spaceId, "space_1");
+  assertEquals(parsed.subject, "tsub_owner");
+  assertEquals(parsed.runtimeBaseUrl, "https://app.example");
+  assertEquals(parsed.deployToken, "deploy-token");
   assertEquals(parsed.serviceResolvers, [{
     kind: "anchor",
     url: "https://anchor.example.test/v1/services",

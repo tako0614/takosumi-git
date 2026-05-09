@@ -6,6 +6,7 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
+import { isAbsolute, join } from "@std/path";
 import type { WorkflowEvent } from "@takos/takosumi-git-workflow-contract";
 import { eventFromGitPush } from "@takos/takosumi-git-source";
 import {
@@ -15,10 +16,14 @@ import {
   type ServiceResolverConfig,
 } from "./push.ts";
 import {
+  applyInstall,
   buildInstallPreview,
   compileInstallManifest,
   digestText,
+  INSTALLABLE_APP_RUNTIME_MODES,
+  type InstallableAppRuntimeMode,
   InstallableAppValidationError,
+  InstallApplyError,
   type InstallSourceCheckoutFactory,
   parseInstallableAppObject,
   parseInstallableAppYaml,
@@ -37,9 +42,17 @@ export interface ServeOptions {
   readonly webhookSecret: string;
   readonly artifactContract: ArtifactContract;
   readonly serviceResolvers?: readonly ServiceResolverConfig[];
+  readonly accountsUrl?: string;
+  readonly accountsToken?: string;
+  readonly accountId?: string;
+  readonly spaceId?: string;
+  readonly subject?: string;
+  readonly runtimeBaseUrl?: string;
+  readonly deployToken?: string;
   readonly rateLimit: number;
   readonly rateLimitWindowMs: number;
   readonly installPreviewCheckoutSource?: InstallSourceCheckoutFactory;
+  readonly installApplyFetch?: typeof fetch;
   readonly waitForDispatch?: boolean;
   readonly dispatch?: WebhookDispatch;
 }
@@ -288,6 +301,15 @@ export function createServeHandler(
         options.installPreviewCheckoutSource,
       );
     }
+    if (request.method === "POST" && url.pathname === "/v1/install/apply") {
+      if (!limiter.allow(rateLimitKey(request))) {
+        return json({ error: "rate_limited" }, 429);
+      }
+      if (!hasBearerToken(request, options.token)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      return await handleInstallApplyRequest(request, options);
+    }
     if (request.method !== "POST") return json({ error: "not_found" }, 404);
     const provider = providerFromPath(url.pathname);
     if (!provider) return json({ error: "not_found" }, 404);
@@ -413,6 +435,122 @@ async function handleInstallPreviewRequest(
   }
 }
 
+async function handleInstallApplyRequest(
+  request: Request,
+  options: ServeOptions,
+): Promise<Response> {
+  if (!options.accountsUrl || !options.accountsToken) {
+    return json({
+      error: "install_apply_not_configured",
+      message:
+        "configure --accounts-url and --accounts-token before using /v1/install/apply",
+    }, 503);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  if (!isRecord(body)) return json({ error: "invalid_json" }, 400);
+
+  try {
+    const gitUrl = optionalBodyString(body, "gitUrl", "git_url");
+    const ref = optionalBodyString(body, "ref");
+    if (!gitUrl || !ref) {
+      return json({
+        error: "invalid_install_apply_request",
+        message: "gitUrl and ref are required",
+      }, 400);
+    }
+    const accountId = optionalBodyString(body, "accountId", "account_id") ??
+      options.accountId;
+    const spaceId = optionalBodyString(body, "spaceId", "space_id") ??
+      optionalBodyString(body, "space") ?? options.spaceId;
+    const subject = optionalBodyString(body, "subject") ?? options.subject;
+    if (!accountId || !spaceId || !subject) {
+      return json({
+        error: "invalid_install_apply_request",
+        message: "accountId, spaceId, and subject are required",
+      }, 400);
+    }
+
+    const cwd = Deno.cwd();
+    const appPathSpec = optionalBodyString(body, "appPath", "app_path") ??
+      ".takosumi/app.yml";
+    const manifestPathSpec = optionalBodyString(
+      body,
+      "manifestPath",
+      "manifest_path",
+    );
+    const mode = parseOptionalBodyMode(body);
+    const sourceCommit = parseOptionalSourceCommit(
+      optionalBodyString(body, "sourceCommit", "source_commit"),
+    );
+    const runtimeBaseUrl = parseOptionalRuntimeBaseUrl(
+      optionalBodyString(body, "runtimeBaseUrl", "runtime_base_url") ??
+        options.runtimeBaseUrl,
+    );
+
+    const result = await applyInstall({
+      subcommand: "apply",
+      cwd,
+      appPathSpec,
+      appPath: pathFromSpec(cwd, appPathSpec),
+      ...(manifestPathSpec
+        ? {
+          manifestPathSpec,
+          manifestPath: pathFromSpec(cwd, manifestPathSpec),
+        }
+        : {}),
+      json: true,
+      sourceGitUrl: gitUrl,
+      sourceRef: ref,
+      accountsUrl: options.accountsUrl,
+      token: options.accountsToken,
+      accountId,
+      spaceId,
+      createdBySubject: subject,
+      ...(mode ? { mode } : {}),
+      ...(sourceCommit ? { sourceCommit } : {}),
+      ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
+      endpoint: options.endpoint,
+      deployToken: options.deployToken ?? options.token,
+      serviceResolvers: options.serviceResolvers,
+      ...(options.installPreviewCheckoutSource
+        ? { checkoutSource: options.installPreviewCheckoutSource }
+        : {}),
+      ...(options.installApplyFetch
+        ? { fetch: options.installApplyFetch }
+        : {}),
+    });
+    return json({
+      ok: true,
+      kind: "takosumi-git.install-apply@v1",
+      ...result,
+    } as unknown as Record<string, unknown>, 202);
+  } catch (error) {
+    if (error instanceof InstallableAppValidationError) {
+      return json({
+        error: "invalid_installable_app",
+        issues: error.issues,
+      }, 400);
+    }
+    if (error instanceof InstallApplyError) {
+      return json({
+        error: "install_apply_failed",
+        status: error.status,
+        body: error.body,
+      }, 502);
+    }
+    return json({
+      error: "invalid_install_apply_request",
+      message: error instanceof Error ? error.message : String(error),
+    }, 400);
+  }
+}
+
 function optionalBodyString(
   body: Record<string, unknown>,
   key: string,
@@ -420,6 +558,66 @@ function optionalBodyString(
 ): string | undefined {
   const value = body[key] ?? (alternateKey ? body[alternateKey] : undefined);
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function hasBearerToken(request: Request, token: string): boolean {
+  const header = request.headers.get("authorization") ?? "";
+  return header === `Bearer ${token}`;
+}
+
+const fullCommitPattern = /^[0-9a-f]{40}$/;
+
+function parseOptionalSourceCommit(
+  value: string | undefined,
+): string | undefined {
+  if (!value) return undefined;
+  if (!fullCommitPattern.test(value)) {
+    throw new Error("sourceCommit must be a 40-char SHA");
+  }
+  return value;
+}
+
+function parseOptionalBodyMode(
+  body: Record<string, unknown>,
+): InstallableAppRuntimeMode | undefined {
+  const value = optionalBodyString(body, "mode");
+  if (!value) return undefined;
+  if (
+    INSTALLABLE_APP_RUNTIME_MODES.includes(value as InstallableAppRuntimeMode)
+  ) {
+    return value as InstallableAppRuntimeMode;
+  }
+  throw new Error(
+    `mode must be one of ${INSTALLABLE_APP_RUNTIME_MODES.join("|")}`,
+  );
+}
+
+function parseOptionalRuntimeBaseUrl(
+  value: string | undefined,
+): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== "https:" &&
+      !(url.protocol === "http:" &&
+        (url.hostname === "localhost" || url.hostname === "127.0.0.1"))
+    ) {
+      throw new Error("unsupported protocol");
+    }
+    url.pathname = url.pathname.replace(/\/+$/, "");
+    url.search = "";
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    throw new Error(
+      "runtimeBaseUrl must be an https URL or localhost http URL",
+    );
+  }
+}
+
+function pathFromSpec(cwd: string, spec: string): string {
+  return isAbsolute(spec) ? spec : join(cwd, spec);
 }
 
 function defaultDispatch(options: ServeOptions): WebhookDispatch {
@@ -462,6 +660,14 @@ export function parseServeArgs(
       "artifact-contract",
       "service-resolver-url",
       "service-resolver-public-key",
+      "accounts-url",
+      "accounts-token",
+      "account-id",
+      "space",
+      "space-id",
+      "subject",
+      "runtime-base-url",
+      "deploy-token",
       "rate-limit",
       "rate-limit-window-ms",
     ],
@@ -489,6 +695,22 @@ export function parseServeArgs(
     | string
     | undefined) ??
     env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
+  const accountsUrl = (flags["accounts-url"] as string | undefined) ??
+    env.get("TAKOSUMI_ACCOUNTS_URL");
+  const accountsToken = (flags["accounts-token"] as string | undefined) ??
+    env.get("TAKOSUMI_ACCOUNTS_TOKEN") ?? env.get("TAKOS_TOKEN");
+  const accountId = (flags["account-id"] as string | undefined) ??
+    env.get("TAKOS_ACCOUNT_ID");
+  const spaceId = (flags["space-id"] as string | undefined) ??
+    (flags.space as string | undefined) ?? env.get("TAKOS_SPACE_ID");
+  const subject = (flags.subject as string | undefined) ??
+    env.get("TAKOSUMI_SUBJECT") ?? env.get("TAKOS_SUBJECT");
+  const runtimeBaseUrl = parseOptionalRuntimeBaseUrl(
+    (flags["runtime-base-url"] as string | undefined) ??
+      env.get("TAKOSUMI_RUNTIME_BASE_URL"),
+  );
+  const deployToken = (flags["deploy-token"] as string | undefined) ??
+    env.get("TAKOSUMI_DEPLOY_TOKEN") ?? env.get("TAKOSUMI_TOKEN");
   if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
     throw new Error(
       "--service-resolver-url and --service-resolver-public-key must be provided together",
@@ -519,6 +741,13 @@ export function parseServeArgs(
         }],
       }
       : {}),
+    ...(accountsUrl ? { accountsUrl } : {}),
+    ...(accountsToken ? { accountsToken } : {}),
+    ...(accountId ? { accountId } : {}),
+    ...(spaceId ? { spaceId } : {}),
+    ...(subject ? { subject } : {}),
+    ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
+    ...(deployToken ? { deployToken } : {}),
     rateLimit: parsePositiveInt(flags["rate-limit"], "--rate-limit"),
     rateLimitWindowMs: parsePositiveInt(
       flags["rate-limit-window-ms"],

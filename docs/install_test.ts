@@ -7,6 +7,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   const installSource = await read("packages/cli/src/install.ts");
   const deployClientSource = await read("packages/deploy-client/src/mod.ts");
   const initSource = await read("packages/cli/src/init.ts");
+  const serveSource = await read("packages/cli/src/serve.ts");
   const mainSource = await read("packages/cli/src/main.ts");
   const agents = await read("AGENTS.md");
 
@@ -17,6 +18,9 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "takosumi-git install preview https://github.com/example/hello --ref v1.2.3",
       "takosumi-git.install-preview@v1",
       "POST /v1/install/preview",
+      "POST /v1/install/apply",
+      "takosumi-git.install-apply@v1",
+      "--accounts-token",
       '"gitUrl": "https://github.com/example/hello"',
       "takosumi-git install apply",
       "takosumi-git install apply https://github.com/example/hello",
@@ -75,6 +79,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   }
 
   assert.ok(deployClientSource.includes("/v1/deployments"));
+  assert.ok(serveSource.includes("/v1/install/apply"));
+  assert.ok(serveSource.includes("handleInstallApplyRequest"));
 
   assert.ok(mainSource.includes("install     Install .takosumi/app.yml"));
   assert.ok(mainSource.includes("--source-commit <sha>"));

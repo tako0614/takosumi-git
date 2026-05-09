@@ -77,6 +77,30 @@ POST /v1/install/preview
 }
 ```
 
+`takosumi-git serve` also exposes a mutating apply API for operators that want
+the same install pipeline behind HTTP:
+
+```text
+POST /v1/install/apply
+Authorization: Bearer <serve-token>
+```
+
+The serve process must be started with `--accounts-url` and `--accounts-token`
+(or `TAKOSUMI_ACCOUNTS_URL` / `TAKOSUMI_ACCOUNTS_TOKEN`). The request body uses
+a Git source plus ledger target fields:
+
+```json
+{
+  "gitUrl": "https://github.com/example/hello",
+  "ref": "v1.2.3",
+  "accountId": "acct_...",
+  "spaceId": "space_...",
+  "subject": "tsub_..."
+}
+```
+
+The response kind is `takosumi-git.install-apply@v1`.
+
 ## Apply
 
 Use apply after the source has a concrete commit pin:
