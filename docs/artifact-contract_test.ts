@@ -15,6 +15,10 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
       "TAKOSUMI_ARTIFACT=<uri>",
       "final non-empty stdout line",
       "[stderr]",
+      "cleared process",
+      "TAKOS_TOKEN",
+      "OIDC_CLIENT_SECRET",
+      "DATABASE_URL",
       "workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI",
       "workflow job '<job>' produced no stdout; cannot resolve artifact URI",
       "artifactContractResolver",
@@ -29,6 +33,8 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
   for (
     const snippet of [
       "ARTIFACT_MARKER_PREFIX",
+      "clearEnv: true",
+      "WORKFLOW_ENV_ALLOWLIST",
       "artifactContractResolver",
       "lastLineArtifactResolver",
       "parseArtifactContract",

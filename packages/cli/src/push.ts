@@ -105,6 +105,19 @@ export type GitRunner = (
 
 const DEFAULT_ARTIFACT_CONTRACT: ArtifactContract = "v1";
 const ARTIFACT_MARKER_PREFIX = "TAKOSUMI_ARTIFACT=";
+const WORKFLOW_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "LANG",
+  "LC_ALL",
+  "TERM",
+] as const;
 
 /** Default executor: spawns `bash -lc <run>` from `cwd`. */
 export function defaultStepExecutor(cwd: string): StepExecutor {
@@ -112,6 +125,8 @@ export function defaultStepExecutor(cwd: string): StepExecutor {
     const cmd = new Deno.Command("bash", {
       args: ["-lc", run],
       cwd,
+      clearEnv: true,
+      env: workflowSandboxEnv(),
       stdout: "piped",
       stderr: "piped",
     });
@@ -125,6 +140,17 @@ export function defaultStepExecutor(cwd: string): StepExecutor {
     const merged = err.length > 0 ? `${out}\n[stderr]\n${err}` : out;
     return { stdout: merged, exitCode: code };
   };
+}
+
+function workflowSandboxEnv(): Record<string, string> {
+  const env: Record<string, string> = {
+    PATH: "/usr/local/bin:/usr/bin:/bin",
+  };
+  for (const key of WORKFLOW_ENV_ALLOWLIST) {
+    const value = Deno.env.get(key);
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 function stdoutLines(text: string): string[] {

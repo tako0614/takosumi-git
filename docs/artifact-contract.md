@@ -81,6 +81,17 @@ The default executor captures stderr separately and appends it to logs after a
 `[stderr]` separator for human debugging. The URI resolver only reads stdout
 before that separator. Printing a URI to stderr does not satisfy this contract.
 
+## Build Environment
+
+The default workflow executor runs build steps with a cleared process
+environment and only a small allowlist needed to locate shell tools and
+temporary directories (`PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `USER`,
+`LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`). Runtime credentials and operator
+tokens such as `TAKOS_TOKEN`, `TAKOSUMI_TOKEN`, `OIDC_CLIENT_SECRET`, or
+`DATABASE_URL` are not inherited by workflow steps. Build workflows must receive
+publish credentials through a future explicit build-secret mechanism, not
+through the operator process environment.
+
 ## Failure Modes
 
 | Condition                                  | Result                                                                                                           |

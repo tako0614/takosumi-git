@@ -2,7 +2,12 @@ import { assert, assertEquals, assertRejects } from "@std/assert";
 import { stringify as stringifyYaml } from "@std/yaml";
 import { join } from "@std/path";
 import type { StepExecutor } from "@takos/takosumi-git-workflow-runner";
-import { type GitRunner, parsePushArgs, push } from "./push.ts";
+import {
+  defaultStepExecutor,
+  type GitRunner,
+  parsePushArgs,
+  push,
+} from "./push.ts";
 
 interface Project {
   readonly root: string;
@@ -71,6 +76,13 @@ const fakeGit: GitRunner = (args) => {
   }
   return Promise.resolve({ code: 1, stdout: "" });
 };
+
+function restoreEnv(values: Record<string, string | undefined>): void {
+  for (const [key, value] of Object.entries(values)) {
+    if (value === undefined) Deno.env.delete(key);
+    else Deno.env.set(key, value);
+  }
+}
 
 const SERVICE_IMPORT_APP_YML = `apiVersion: app.takosumi.dev/v1
 kind: InstallableApp
@@ -198,6 +210,45 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
     assertEquals(fetchCalls, 0, "dry-run must not call fetch");
   } finally {
     await project.cleanup();
+  }
+});
+
+Deno.test("default workflow executor does not inherit runtime secrets", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-sandbox-" });
+  const previous = {
+    TAKOS_TOKEN: Deno.env.get("TAKOS_TOKEN"),
+    OIDC_CLIENT_SECRET: Deno.env.get("OIDC_CLIENT_SECRET"),
+    DATABASE_URL: Deno.env.get("DATABASE_URL"),
+  };
+  Deno.env.set("TAKOS_TOKEN", "takos-token-secret");
+  Deno.env.set("OIDC_CLIENT_SECRET", "oidc-client-secret");
+  Deno.env.set("DATABASE_URL", "postgres://secret@example/db");
+  try {
+    const executor = defaultStepExecutor(root);
+    const outcome = await executor(
+      `
+if [ -n "$TAKOS_TOKEN$OIDC_CLIENT_SECRET$DATABASE_URL" ]; then
+  echo "leaked:$TAKOS_TOKEN:$OIDC_CLIENT_SECRET:$DATABASE_URL"
+else
+  echo "isolated"
+fi
+echo "TAKOSUMI_ARTIFACT=ghcr.io/example/app@sha256:deadbeef"
+`,
+      {
+        job: "build-image",
+        step: "probe-env",
+        event: { kind: "manual", source: "test" },
+      },
+    );
+
+    assertEquals(outcome.exitCode, 0);
+    assert(outcome.stdout.includes("isolated"));
+    assert(!outcome.stdout.includes("takos-token-secret"));
+    assert(!outcome.stdout.includes("oidc-client-secret"));
+    assert(!outcome.stdout.includes("postgres://secret@example/db"));
+  } finally {
+    restoreEnv(previous);
+    await Deno.remove(root, { recursive: true }).catch(() => {});
   }
 });
 
