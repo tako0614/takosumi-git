@@ -729,6 +729,14 @@ resources:
         }
         return Promise.resolve(Response.json({
           installation: { id: "inst_1" },
+          binding_env: {
+            DATABASE_URL:
+              "postgres://takos:secret@db.example.test:5432/takos?sslmode=require",
+            BLOB_ENDPOINT: "https://objects.example.test",
+            BLOB_BUCKET: "inst-1",
+            BLOB_ACCESS_KEY: "access-key",
+            BLOB_SECRET_KEY: "secret-key",
+          },
           bindings: [{
             name: "auth",
             kind: "identity.oidc@v1",
@@ -769,6 +777,12 @@ resources:
     );
     assertEquals(result.accounts.oidcClient?.client_id, "toc_1");
     assertEquals(result.accounts.oidcClientSecret, "client-secret");
+    assertEquals(
+      result.accounts.bindingEnv?.DATABASE_URL?.startsWith(
+        "postgres://takos:secret@db.example.test",
+      ),
+      true,
+    );
     assertEquals(requests.length, 4);
     const body = await requests[0].json();
     assertEquals(body.serviceImports, [{
@@ -783,6 +797,16 @@ resources:
         binding.kind === "service.import@v1"
       ),
       false,
+    );
+    assertEquals(
+      body.bindings.find((
+        binding: { name: string },
+      ) => binding.name === "database")?.declaration,
+      {
+        type: "database.postgres@v1",
+        required: true,
+        plan: "nano",
+      },
     );
     assertEquals(body.oidcClients, [{
       binding: "auth",
@@ -824,6 +848,12 @@ resources:
         OIDC_CLIENT_ID: "toc_1",
         OIDC_REDIRECT_URI: "http://localhost:8787/auth/oidc/callback",
         OIDC_CLIENT_SECRET: "client-secret",
+        DATABASE_URL:
+          "postgres://takos:secret@db.example.test:5432/takos?sslmode=require",
+        BLOB_ENDPOINT: "https://objects.example.test",
+        BLOB_BUCKET: "inst-1",
+        BLOB_ACCESS_KEY: "access-key",
+        BLOB_SECRET_KEY: "secret-key",
         INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
         INSTALL_LAUNCH_AUDIENCE: "example.hello",
         INSTALL_LAUNCH_ISSUER: "https://accounts.example",

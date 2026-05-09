@@ -181,25 +181,29 @@ kernel HTTP 4xx/5xx response. The request includes a reason such as
 `kernel deploy HTTP 200` so the Accounts event hash chain can explain the
 transition.
 
-AppBinding create requests sent by takosumi-git intentionally carry pending
-`configRef` values:
+AppBinding create requests sent by takosumi-git intentionally carry the approved
+declaration and a pending `configRef` value:
 
 ```text
 takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>
 ```
 
-Those refs identify the approved binding declaration. Takosumi Accounts may
-replace them in the create response with Accounts-owned refs such as
-`takosumi-accounts://.../oidc-client/<client-id>` or
-`takosumi-accounts://.../launch-token/<kid>` without changing the original
-approval evidence.
+Those refs identify the approved binding declaration digest, while the attached
+declaration lets Takosumi Accounts hand the request to its provider
+materializer. Accounts may replace them in the create response with
+Accounts-owned refs such as `takosumi-accounts://.../oidc-client/<client-id>`,
+`takosumi-accounts://.../launch-token/<kid>`, or provider-backed refs for
+database, object-store, domain, and deploy-intent bindings without changing the
+original approval evidence.
 
 When `install apply` also deploys to a kernel endpoint, takosumi-git uses the
-Accounts create response and `GET /v1/installations/{id}/launch-token` public
-config to inject missing default runtime environment values into compute
-resources before `POST /v1/deployments`. Explicit `env:` keys in the manifest
-win; only missing keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
-`OIDC_REDIRECT_URI`, `TAKOS_INSTALLATION_ID`, and `INSTALL_LAUNCH_*` are filled.
+Accounts create response (`binding_env`, OIDC client material, and
+`GET /v1/installations/{id}/launch-token` public config) to inject missing
+default runtime environment values into compute resources before
+`POST /v1/deployments`. Explicit `env:` keys in the manifest win; only missing
+keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`,
+`DATABASE_URL`, `BLOB_*`, `DEPLOY_INTENT_*`, `TAKOS_INSTALLATION_ID`, and
+`INSTALL_LAUNCH_*` are filled.
 
 ## Service Imports
 

@@ -2001,6 +2001,7 @@ export interface AccountsInstallResponseSummary {
   readonly bindings: readonly Record<string, unknown>[];
   readonly oidcClient?: Record<string, unknown>;
   readonly oidcClientSecret?: string;
+  readonly bindingEnv?: Record<string, string>;
   readonly launchTokenConfig?: Record<string, unknown>;
 }
 
@@ -2014,6 +2015,7 @@ function appBindingCreateRequests(
       `takosumi-git://installable-app/${app.metadata.id}/bindings/${name}/${
         digestJson(binding)
       }`,
+    declaration: binding,
     secretRefs: [],
   })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
 }
@@ -2363,6 +2365,9 @@ function accountsRuntimeEnv(input: {
   runtimeBaseUrl?: string;
 }): Record<string, string> {
   const env: Record<string, string> = {};
+  for (const [key, value] of Object.entries(input.accounts.bindingEnv ?? {})) {
+    env[key] = value;
+  }
   if (input.accounts.installationId) {
     env.TAKOS_INSTALLATION_ID = input.accounts.installationId;
   }
@@ -2604,6 +2609,7 @@ function readAccountsInstallResponse(
     "oidc_client_secret",
     "oidcClientSecret",
   );
+  const bindingEnv = stringRecordProperty(record, "binding_env", "bindingEnv");
   return {
     ...(readInstallationId(body)
       ? { installationId: readInstallationId(body) }
@@ -2611,6 +2617,7 @@ function readAccountsInstallResponse(
     bindings,
     ...(oidcClient ? { oidcClient } : {}),
     ...(oidcClientSecret ? { oidcClientSecret } : {}),
+    ...(bindingEnv ? { bindingEnv } : {}),
   };
 }
 
@@ -2644,4 +2651,18 @@ function stringArrayProperty(
       typeof entry === "string" && entry.length > 0
     )
     : [];
+}
+
+function stringRecordProperty(
+  record: Record<string, unknown>,
+  snakeKey: string,
+  camelKey: string,
+): Record<string, string> | undefined {
+  const value = record[snakeKey] ?? record[camelKey];
+  if (!isRecord(value)) return undefined;
+  const output: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === "string" && entry.length > 0) output[key] = entry;
+  }
+  return Object.keys(output).length > 0 ? output : undefined;
 }
