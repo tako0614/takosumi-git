@@ -65,7 +65,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
 
   assert.ok(deployClientSource.includes("/v1/deployments"));
 
-  assert.ok(mainSource.includes("install     Preview or install"));
+  assert.ok(mainSource.includes("install     Install .takosumi/app.yml"));
   assert.ok(mainSource.includes("--source-commit <sha>"));
   assert.ok(mainSource.includes("--ref <ref>"));
   assert.ok(initSource.includes("appSkeleton"));

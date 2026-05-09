@@ -26,7 +26,7 @@ USAGE:
 COMMANDS:
   init        Scaffold .takosumi/app.yml, manifest.yml, and workflows
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
-  install     Preview or install .takosumi/app.yml InstallableApp metadata
+  install     Install .takosumi/app.yml metadata from a local repo or Git URL
   serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
   help        Show this help
@@ -51,8 +51,9 @@ PUSH OPTIONS:
   --dry-run                    run workflows but skip POST; print resolved manifest
 
 INSTALL OPTIONS:
+  [<git-url>]                  create an AppInstallation in Takosumi Accounts
   preview [<git-url>]          parse .takosumi/app.yml and print install preview
-  apply [<git-url>]            create an AppInstallation in Takosumi Accounts
+  apply [<git-url>]            explicit form of the default install action
   --cwd <dir>                  project root (default .)
   --app <path>                 InstallableApp YAML (default .takosumi/app.yml)
   --manifest <path>            kernel manifest path override

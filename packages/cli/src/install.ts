@@ -1521,13 +1521,16 @@ export function parseInstallArgs(
   args: readonly string[],
   env: { get(key: string): string | undefined } = Deno.env,
 ): ParsedInstallArgs {
-  const [subcommand, ...rest] = args;
+  const [first, ...tail] = args;
   if (
-    !subcommand || subcommand === "help" || subcommand === "-h" ||
-    subcommand === "--help"
+    !first || first === "help" || first === "-h" ||
+    first === "--help"
   ) {
     throw new InstallHelpRequested();
   }
+  const hasExplicitSubcommand = first === "preview" || first === "apply";
+  const subcommand = hasExplicitSubcommand ? first : "apply";
+  const rest = hasExplicitSubcommand ? tail : args;
   if (subcommand !== "preview" && subcommand !== "apply") {
     throw new Error(`unknown install command '${subcommand}'`);
   }
@@ -1747,8 +1750,12 @@ export class InstallHelpRequested extends Error {
 const INSTALL_HELP_TEXT = `takosumi-git install
 
 USAGE:
+  takosumi-git install [<git-url>] [options]
   takosumi-git install preview [<git-url>] [options]
   takosumi-git install apply [<git-url>] [options]
+
+DEFAULT ACTION:
+  Without an explicit subcommand, install behaves like \`install apply\`.
 
 PREVIEW OPTIONS:
   --cwd <dir>        project root (default .)

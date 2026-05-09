@@ -82,7 +82,7 @@ POST /v1/install/preview
 Use apply after the source has a concrete commit pin:
 
 ```bash
-takosumi-git install apply \
+takosumi-git install \
   --cwd . \
   --accounts-url http://127.0.0.1:8787 \
   --account-id acct_... \
@@ -95,13 +95,18 @@ takosumi-git install apply \
   --deploy-token "$TAKOSUMI_DEPLOY_TOKEN"
 ```
 
-For Git URL apply, pass the same source and ref. takosumi-git checks out the
-ref, verifies that `.takosumi/app.yml` declares the same `source.git` and
+For Git URL apply, pass the source and ref. takosumi-git checks out the ref,
+verifies that `.takosumi/app.yml` declares the same `source.git` and
 `source.ref`, resolves the concrete commit, and records that commit in the
-AppInstallation request.
+AppInstallation request. `install apply` remains as an explicit alias for the
+same default action:
 
 ```bash
-takosumi-git install apply https://github.com/example/hello \
+takosumi-git install apply https://github.com/example/hello --ref v1.2.3
+```
+
+```bash
+takosumi-git install https://github.com/example/hello \
   --ref v1.2.3 \
   --accounts-url http://127.0.0.1:8787 \
   --account-id acct_... \

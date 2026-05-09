@@ -448,6 +448,26 @@ Deno.test("parseInstallArgs accepts Git URL source and immutable ref", () => {
   assertEquals(parsed.json, true);
 });
 
+Deno.test("parseInstallArgs treats bare install as apply", () => {
+  const parsed = parseInstallArgs([
+    "https://github.com/example/hello",
+    "--ref",
+    "v1.2.3",
+    "--accounts-url",
+    "http://accounts.example",
+    "--account-id",
+    "acct_1",
+    "--space-id",
+    "space_1",
+    "--subject",
+    "tsub_owner",
+  ]);
+
+  assertEquals(parsed.subcommand, "apply");
+  assertEquals(parsed.sourceGitUrl, "https://github.com/example/hello");
+  assertEquals(parsed.sourceRef, "v1.2.3");
+});
+
 Deno.test("parseInstallArgs rejects mutable Git URL refs", () => {
   assertThrows(
     () =>
