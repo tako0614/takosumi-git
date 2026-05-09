@@ -394,6 +394,93 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   }]);
 });
 
+Deno.test("parseInstallArgs accepts Git URL source and immutable ref", () => {
+  const parsed = parseInstallArgs([
+    "preview",
+    "https://github.com/example/hello",
+    "--ref",
+    "v1.2.3",
+    "--app",
+    ".takosumi/app.yml",
+    "--manifest",
+    ".takosumi/manifest.yml",
+    "--json",
+  ]);
+
+  assertEquals(parsed.sourceGitUrl, "https://github.com/example/hello");
+  assertEquals(parsed.sourceRef, "v1.2.3");
+  assertEquals(parsed.appPathSpec, ".takosumi/app.yml");
+  assertEquals(parsed.manifestPathSpec, ".takosumi/manifest.yml");
+  assertEquals(parsed.json, true);
+});
+
+Deno.test("parseInstallArgs rejects mutable Git URL refs", () => {
+  assertThrows(
+    () =>
+      parseInstallArgs([
+        "preview",
+        "https://github.com/example/hello",
+        "--ref",
+        "main",
+      ]),
+    Error,
+    "--ref looks mutable: main",
+  );
+});
+
+Deno.test("previewInstall checks out Git URL source and pins resolved commit", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-install-checkout-",
+  });
+  let cleanupCalled = false;
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi"));
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      VALID_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+
+    const preview = await previewInstall({
+      subcommand: "preview",
+      cwd: "/unused",
+      appPath: "/unused/.takosumi/app.yml",
+      appPathSpec: ".takosumi/app.yml",
+      manifestPathSpec: ".takosumi/manifest.yml",
+      json: true,
+      sourceGitUrl: "https://github.com/example/hello",
+      sourceRef: "v1.2.3",
+      checkoutSource: (request) => {
+        assertEquals(request, {
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+        });
+        return Promise.resolve({
+          root: checkoutRoot,
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          cleanup: () => {
+            cleanupCalled = true;
+            return Promise.resolve();
+          },
+        });
+      },
+    });
+
+    assertEquals(
+      preview.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+    assertEquals(preview.source.pinned, true);
+    assert(preview.source.compiledManifestDigest?.startsWith("sha256:"));
+    assertEquals(cleanupCalled, true);
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
 Deno.test("applyInstall posts AppInstallation create request", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
   const requests: Request[] = [];
@@ -723,6 +810,54 @@ Deno.test("applyInstall accepts resolver-provided source commit", async () => {
     );
   } finally {
     await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall uses Git URL checkout commit as source pin", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-install-apply-checkout-",
+  });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi"));
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      VALID_APP_YML,
+    );
+
+    await applyInstall({
+      subcommand: "apply",
+      cwd: "/unused",
+      appPath: "/unused/.takosumi/app.yml",
+      appPathSpec: ".takosumi/app.yml",
+      json: true,
+      sourceGitUrl: "https://github.com/example/hello",
+      sourceRef: "v1.2.3",
+      accountsUrl: "http://accounts.example",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      checkoutSource: () =>
+        Promise.resolve({
+          root: checkoutRoot,
+          commit: "fedcba9876543210fedcba9876543210fedcba98",
+          cleanup: () => Promise.resolve(),
+        }),
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1" },
+        }, { status: 202 }));
+      },
+    });
+
+    const body = await requests[0].json();
+    assertEquals(
+      body.source.commit,
+      "fedcba9876543210fedcba9876543210fedcba98",
+    );
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
   }
 });
 

@@ -35,6 +35,14 @@ Use preview before creating any ledger record:
 takosumi-git install preview --cwd . --json
 ```
 
+Preview can also read directly from a Git source. The ref must be immutable
+enough for approval evidence: a full commit SHA, a semver tag, a release tag, or
+`refs/tags/<tag>`.
+
+```bash
+takosumi-git install preview https://github.com/example/hello --ref v1.2.3 --json
+```
+
 The preview response is `takosumi-git.install-preview@v1` and includes:
 
 - app identity, publisher, homepage
@@ -66,6 +74,20 @@ takosumi-git install apply \
   --mode shared-cell \
   --endpoint "$TAKOSUMI_ENDPOINT" \
   --deploy-token "$TAKOSUMI_DEPLOY_TOKEN"
+```
+
+For Git URL apply, pass the same source and ref. takosumi-git checks out the
+ref, verifies that `.takosumi/app.yml` declares the same `source.git` and
+`source.ref`, resolves the concrete commit, and records that commit in the
+AppInstallation request.
+
+```bash
+takosumi-git install apply https://github.com/example/hello \
+  --ref v1.2.3 \
+  --accounts-url http://127.0.0.1:8787 \
+  --account-id acct_... \
+  --space-id space_... \
+  --subject tsub_...
 ```
 
 `install apply` posts to Takosumi Accounts:

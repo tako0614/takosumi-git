@@ -1462,8 +1462,12 @@ export interface ParsedInstallArgs {
   readonly subcommand: "preview" | "apply";
   readonly cwd: string;
   readonly appPath: string;
+  readonly appPathSpec?: string;
   readonly manifestPath?: string;
+  readonly manifestPathSpec?: string;
   readonly json: boolean;
+  readonly sourceGitUrl?: string;
+  readonly sourceRef?: string;
   readonly accountsUrl?: string;
   readonly token?: string;
   readonly accountId?: string;
@@ -1482,6 +1486,21 @@ export interface InstallServiceResolverConfig {
   readonly url: string;
   readonly publicKey: string;
 }
+
+export interface InstallSourceCheckout {
+  readonly root: string;
+  readonly commit: string;
+  cleanup(): Promise<void>;
+}
+
+export interface InstallSourceCheckoutRequest {
+  readonly gitUrl: string;
+  readonly ref: string;
+}
+
+export type InstallSourceCheckoutFactory = (
+  request: InstallSourceCheckoutRequest,
+) => Promise<InstallSourceCheckout>;
 
 export function parseInstallArgs(
   args: readonly string[],
@@ -1502,6 +1521,8 @@ export function parseInstallArgs(
       "cwd",
       "app",
       "manifest",
+      "git-url",
+      "ref",
       "accounts-url",
       "token",
       "account-id",
@@ -1523,8 +1544,20 @@ export function parseInstallArgs(
       json: false,
     },
   });
+  const positional = (flags._ ?? []).map((value) => String(value));
+  if (positional.length > 1) {
+    throw new Error("install accepts at most one Git URL argument");
+  }
+  if (positional.length === 1 && typeof flags["git-url"] === "string") {
+    throw new Error("pass either <git-url> or --git-url, not both");
+  }
+  const sourceGitUrl = (flags["git-url"] as string | undefined) ??
+    positional[0];
+  const sourceRef = (flags.ref as string | undefined) ??
+    (sourceGitUrl ? env.get("TAKOSUMI_INSTALL_REF") : undefined);
   const cwd = resolve(flags.cwd as string);
   const app = flags.app as string;
+  const manifest = flags.manifest as string | undefined;
   const mode = flags.mode === undefined
     ? undefined
     : parseRuntimeMode(flags.mode);
@@ -1559,6 +1592,19 @@ export function parseInstallArgs(
   if (sourceCommit && !fullCommitPattern.test(sourceCommit)) {
     throw new Error("--source-commit must be a 40-char SHA");
   }
+  if (sourceGitUrl) {
+    validateInstallGitUrl(sourceGitUrl);
+    if (!sourceRef) {
+      throw new Error(
+        "Git URL install requires --ref (or TAKOSUMI_INSTALL_REF)",
+      );
+    }
+    validateInstallSourceRef(sourceRef);
+    validateGitInstallPathOption("--app", app);
+    if (manifest) validateGitInstallPathOption("--manifest", manifest);
+  } else if (sourceRef) {
+    throw new Error("--ref requires a Git URL source");
+  }
   if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
     throw new Error(
       "--service-resolver-url and --service-resolver-public-key must be provided together",
@@ -1589,11 +1635,15 @@ export function parseInstallArgs(
   return {
     subcommand,
     cwd,
+    appPathSpec: app,
     appPath: isAbsolute(app) ? app : join(cwd, app),
-    manifestPath: typeof flags.manifest === "string"
-      ? isAbsolute(flags.manifest) ? flags.manifest : join(cwd, flags.manifest)
+    ...(manifest ? { manifestPathSpec: manifest } : {}),
+    manifestPath: typeof manifest === "string"
+      ? isAbsolute(manifest) ? manifest : join(cwd, manifest)
       : undefined,
     json: Boolean(flags.json),
+    ...(sourceGitUrl ? { sourceGitUrl } : {}),
+    ...(sourceRef ? { sourceRef } : {}),
     ...(accountsUrl ? { accountsUrl } : {}),
     ...(token ? { token } : {}),
     ...(accountId ? { accountId } : {}),
@@ -1628,6 +1678,28 @@ function parseRuntimeMode(value: unknown): InstallableAppRuntimeMode {
   );
 }
 
+function validateInstallGitUrl(value: string): void {
+  if (!value.startsWith("https://") && !/^git@[^:]+:.+/.test(value)) {
+    throw new Error("Git URL must be an https URL or git@host:path URL");
+  }
+}
+
+function validateInstallSourceRef(value: string): void {
+  const issues: InstallableAppValidationIssue[] = [];
+  validateSourceRef(value, issues);
+  if (issues.length > 0) {
+    throw new Error(`--ref ${issues.map((issue) => issue.message).join("; ")}`);
+  }
+}
+
+function validateGitInstallPathOption(flag: string, value: string): void {
+  if (isAbsolute(value) || value.split("/").includes("..")) {
+    throw new Error(
+      `${flag} must be repo-relative without .. when installing from Git URL`,
+    );
+  }
+}
+
 function parseRuntimeBaseUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;
   try {
@@ -1660,13 +1732,15 @@ export class InstallHelpRequested extends Error {
 const INSTALL_HELP_TEXT = `takosumi-git install
 
 USAGE:
-  takosumi-git install preview [options]
-  takosumi-git install apply [options]
+  takosumi-git install preview [<git-url>] [options]
+  takosumi-git install apply [<git-url>] [options]
 
 PREVIEW OPTIONS:
   --cwd <dir>        project root (default .)
   --app <path>       InstallableApp YAML (default .takosumi/app.yml)
   --manifest <path>  kernel manifest path override
+  --git-url <url>    Git source URL (or positional <git-url>)
+  --ref <ref>        immutable tag/ref/full SHA for Git URL install
   --json             print preview JSON
 
 APPLY OPTIONS:
@@ -1693,38 +1767,164 @@ interface InstallContext {
   readonly compiledManifest?: CompiledInstallManifest;
 }
 
+type LoadInstallContextOptions =
+  & Pick<
+    ParsedInstallArgs,
+    | "cwd"
+    | "appPath"
+    | "appPathSpec"
+    | "manifestPath"
+    | "manifestPathSpec"
+    | "sourceGitUrl"
+    | "sourceRef"
+  >
+  & {
+    readonly checkoutSource?: InstallSourceCheckoutFactory;
+  };
+
 async function loadInstallContext(
-  options: Pick<ParsedInstallArgs, "cwd" | "appPath" | "manifestPath">,
+  options: LoadInstallContextOptions,
 ): Promise<InstallContext> {
-  const appText = await Deno.readTextFile(options.appPath);
-  const app = parseInstallableAppYaml(appText);
-  const repoRoot = options.cwd || dirname(dirname(options.appPath));
-  const manifestPath = options.manifestPath ??
-    (isAbsolute(app.entry.manifest)
-      ? app.entry.manifest
-      : join(repoRoot, app.entry.manifest));
-  const manifestText = await tryRead(manifestPath);
-  const compiledManifest = manifestText
-    ? compileInstallManifest(app, manifestText)
-    : undefined;
-  const warnings = manifestText
-    ? []
-    : [`entry manifest not found at ${manifestPath}`];
+  const sourceCheckout = await maybeCheckoutInstallSource(options);
+  try {
+    const repoRoot = sourceCheckout?.root ?? options.cwd ??
+      dirname(dirname(options.appPath));
+    const appPath = sourceCheckout
+      ? join(repoRoot, options.appPathSpec ?? DEFAULT_APP_PATH)
+      : options.appPath;
+    const appText = await Deno.readTextFile(appPath);
+    let app = parseInstallableAppYaml(appText);
+    if (sourceCheckout && options.sourceGitUrl && options.sourceRef) {
+      app = appWithCheckedOutSource(app, {
+        gitUrl: options.sourceGitUrl,
+        ref: options.sourceRef,
+        commit: sourceCheckout.commit,
+      });
+    }
+    const manifestPath = sourceCheckout
+      ? options.manifestPathSpec
+        ? join(repoRoot, options.manifestPathSpec)
+        : join(repoRoot, app.entry.manifest)
+      : options.manifestPath ??
+        (isAbsolute(app.entry.manifest)
+          ? app.entry.manifest
+          : join(repoRoot, app.entry.manifest));
+    const manifestText = await tryRead(manifestPath);
+    const compiledManifest = manifestText
+      ? compileInstallManifest(app, manifestText)
+      : undefined;
+    const warnings = manifestText
+      ? []
+      : [`entry manifest not found at ${manifestPath}`];
+    return {
+      app,
+      ...(compiledManifest ? { compiledManifest } : {}),
+      preview: buildInstallPreview(app, {
+        appManifestDigest: digestText(appText),
+        ...(compiledManifest
+          ? { compiledManifestDigest: compiledManifest.digest }
+          : {}),
+        compatibilityWarnings: warnings,
+      }),
+    };
+  } finally {
+    await sourceCheckout?.cleanup();
+  }
+}
+
+async function maybeCheckoutInstallSource(
+  options: LoadInstallContextOptions,
+): Promise<InstallSourceCheckout | undefined> {
+  if (!options.sourceGitUrl) return undefined;
+  if (!options.sourceRef) {
+    throw new Error("Git URL install requires --ref");
+  }
+  return await (options.checkoutSource ?? checkoutGitSource)({
+    gitUrl: options.sourceGitUrl,
+    ref: options.sourceRef,
+  });
+}
+
+function appWithCheckedOutSource(
+  app: InstallableApp,
+  source: {
+    readonly gitUrl: string;
+    readonly ref: string;
+    readonly commit: string;
+  },
+): InstallableApp {
+  if (normalizeGitUrl(app.source.git) !== normalizeGitUrl(source.gitUrl)) {
+    throw new Error(
+      `.takosumi/app.yml source.git (${app.source.git}) does not match requested Git URL (${source.gitUrl})`,
+    );
+  }
+  if (app.source.ref !== source.ref) {
+    throw new Error(
+      `.takosumi/app.yml source.ref (${app.source.ref}) does not match requested ref (${source.ref})`,
+    );
+  }
+  if (app.source.commit && app.source.commit !== source.commit) {
+    throw new Error(
+      `.takosumi/app.yml source.commit (${app.source.commit}) does not match checked-out commit (${source.commit})`,
+    );
+  }
   return {
-    app,
-    ...(compiledManifest ? { compiledManifest } : {}),
-    preview: buildInstallPreview(app, {
-      appManifestDigest: digestText(appText),
-      ...(compiledManifest
-        ? { compiledManifestDigest: compiledManifest.digest }
-        : {}),
-      compatibilityWarnings: warnings,
-    }),
+    ...app,
+    source: {
+      ...app.source,
+      commit: source.commit,
+    },
   };
 }
 
+function normalizeGitUrl(value: string): string {
+  return value.replace(/\/+$/, "").replace(/\.git$/, "");
+}
+
+async function checkoutGitSource(
+  request: InstallSourceCheckoutRequest,
+): Promise<InstallSourceCheckout> {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  try {
+    await runGit(["init"], root);
+    await runGit(["remote", "add", "origin", request.gitUrl], root);
+    await runGit(["fetch", "--depth", "1", "origin", request.ref], root);
+    await runGit(["checkout", "--detach", "FETCH_HEAD"], root);
+    const commit = (await runGit(["rev-parse", "HEAD"], root)).trim();
+    if (!fullCommitPattern.test(commit)) {
+      throw new Error(`git resolved invalid commit '${commit}'`);
+    }
+    return {
+      root,
+      commit,
+      cleanup: () => Deno.remove(root, { recursive: true }),
+    };
+  } catch (error) {
+    await Deno.remove(root, { recursive: true }).catch(() => {});
+    throw error;
+  }
+}
+
+async function runGit(args: readonly string[], cwd: string): Promise<string> {
+  const command = new Deno.Command("git", {
+    args: args as string[],
+    cwd,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await command.output();
+  const stdout = new TextDecoder().decode(output.stdout);
+  if (output.success) return stdout;
+  const stderr = new TextDecoder().decode(output.stderr).trim();
+  throw new Error(
+    `git ${args.join(" ")} failed${stderr ? `: ${stderr}` : ""}`,
+  );
+}
+
 export async function previewInstall(
-  options: ParsedInstallArgs,
+  options: ParsedInstallArgs & {
+    readonly checkoutSource?: InstallSourceCheckoutFactory;
+  },
 ): Promise<InstallPreview> {
   return (await loadInstallContext(options)).preview;
 }
@@ -1817,6 +2017,7 @@ export async function applyInstall(
     readonly accountId: string;
     readonly spaceId: string;
     readonly createdBySubject: string;
+    readonly checkoutSource?: InstallSourceCheckoutFactory;
     readonly fetch?: typeof fetch;
   },
 ): Promise<InstallApplyResult> {
@@ -1824,6 +2025,14 @@ export async function applyInstall(
   const mode = options.mode ?? app.runtime.modes[0];
   if (!app.runtime.modes.includes(mode)) {
     throw new Error(`mode ${mode} is not supported by ${app.metadata.id}`);
+  }
+  if (
+    options.sourceCommit && app.source.commit &&
+    options.sourceCommit !== app.source.commit
+  ) {
+    throw new Error(
+      `--source-commit (${options.sourceCommit}) does not match resolved source commit (${app.source.commit})`,
+    );
   }
   const sourceCommit = options.sourceCommit ?? app.source.commit ??
     (fullCommitPattern.test(app.source.ref) ? app.source.ref : undefined);

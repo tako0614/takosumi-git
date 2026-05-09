@@ -14,12 +14,15 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
     const snippet of [
       ".takosumi/app.yml",
       "takosumi-git install preview",
+      "takosumi-git install preview https://github.com/example/hello --ref v1.2.3",
       "takosumi-git.install-preview@v1",
       "takosumi-git install apply",
+      "takosumi-git install apply https://github.com/example/hello",
       "POST /v1/installations",
       "POST /v1/deployments",
       "PATCH /v1/installations/{installation-id}/status",
       "--source-commit",
+      "--ref",
       "--endpoint",
       "--deploy-token",
       "takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>",
@@ -43,6 +46,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "appBindingCreateRequests",
       "compileInstallManifest",
       "buildKernelServiceImports",
+      "checkoutGitSource",
+      "sourceGitUrl",
       "source.commit is required for install apply",
       "POST",
       "/v1/installations",
@@ -60,6 +65,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
 
   assert.ok(mainSource.includes("install     Preview or install"));
   assert.ok(mainSource.includes("--source-commit <sha>"));
+  assert.ok(mainSource.includes("--ref <ref>"));
   assert.ok(initSource.includes("appSkeleton"));
   assert.ok(initSource.includes("app.yml"));
   assert.ok(agents.includes(".takosumi/app.yml"));

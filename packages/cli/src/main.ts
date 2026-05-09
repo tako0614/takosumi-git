@@ -51,11 +51,13 @@ PUSH OPTIONS:
   --dry-run                    run workflows but skip POST; print resolved manifest
 
 INSTALL OPTIONS:
-  preview                      parse .takosumi/app.yml and print install preview
-  apply                        create an AppInstallation in Takosumi Accounts
+  preview [<git-url>]          parse .takosumi/app.yml and print install preview
+  apply [<git-url>]            create an AppInstallation in Takosumi Accounts
   --cwd <dir>                  project root (default .)
   --app <path>                 InstallableApp YAML (default .takosumi/app.yml)
   --manifest <path>            kernel manifest path override
+  --git-url <url>              Git source URL (or positional <git-url>)
+  --ref <ref>                  immutable tag/ref/full SHA for Git URL install
   --accounts-url <url>         Takosumi Accounts URL for apply
   --account-id <id>            ledger account id for apply
   --space-id <id>              target space id for apply
