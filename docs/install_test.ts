@@ -35,6 +35,12 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "non-zero",
       "kernel deploy HTTP 200",
       "Preview is non-mutating",
+      "takosumi-git upgrade inst_01J",
+      "takosumi-git rollback inst_01J",
+      "POST /v1/installations/{installation-id}/upgrade",
+      "POST /v1/installations/{installation-id}/rollback",
+      "installation.upgraded",
+      "installation.rolled_back",
     ]
   ) {
     assert.ok(doc.includes(snippet), `install doc missing ${snippet}`);

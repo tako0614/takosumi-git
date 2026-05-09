@@ -207,3 +207,27 @@ was resolved externally, pass it with `--source-commit`. If neither
 This keeps the ledger explainable: the app manifest digest, compiled manifest
 digest, git ref, and concrete source commit are recorded before the optional
 runtime deployment step.
+
+## Upgrade and Rollback
+
+`takosumi-git upgrade` and `takosumi-git rollback` reuse the same Git URL
+preview path and then post a source revision to Takosumi Accounts when `--apply`
+is present:
+
+```bash
+takosumi-git upgrade inst_01J... --ref v1.2.4 --accounts-url http://127.0.0.1:8787
+takosumi-git rollback inst_01J... --to v1.2.3 --accounts-url http://127.0.0.1:8787 --apply
+```
+
+Without `--apply`, both commands are non-mutating. The preview compares the
+current AppInstallation source pin with the next `.takosumi/app.yml` metadata,
+shows manifest digest changes, permission diff, binding diff, and a small
+migration plan. With `--apply`, the CLI calls:
+
+```text
+POST /v1/installations/{installation-id}/upgrade
+POST /v1/installations/{installation-id}/rollback
+```
+
+Takosumi Accounts updates the AppInstallation source pin and appends an
+`installation.upgraded` or `installation.rolled_back` event to the hash chain.

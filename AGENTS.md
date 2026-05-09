@@ -106,6 +106,8 @@ takosumi-git init [options]           # .takosumi/app.yml + manifest.yml + workf
 takosumi-git push [options]           # repo の .takosumi/manifest.yml + workflow を解決して takosumi に投下
 takosumi-git install preview          # .takosumi/app.yml から install preview を生成
 takosumi-git install apply            # Takosumi Accounts に AppInstallation を作成
+takosumi-git upgrade <id> --ref <ref> # AppInstallation の source revision を preview / apply
+takosumi-git rollback <id> --to <ref> # AppInstallation の previous ref への rollback を preview / apply
 takosumi-git serve --webhook          # git webhook を受け、自動で push 実行 (stub)
 takosumi-git history                  # git history = manifest version 履歴を表示
 ```

@@ -13,6 +13,7 @@ import { runInitCli } from "./init.ts";
 import { runHistoryCli } from "./history.ts";
 import { runServeCli } from "./serve.ts";
 import { runInstallCli } from "./install.ts";
+import { runRollbackCli, runUpgradeCli } from "./revision.ts";
 
 const VERSION = "0.3.0";
 
@@ -27,6 +28,8 @@ COMMANDS:
   init        Scaffold .takosumi/app.yml, manifest.yml, and workflows
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
   install     Install .takosumi/app.yml metadata from a local repo or Git URL
+  upgrade     Preview or apply an AppInstallation source revision
+  rollback    Preview or apply an AppInstallation rollback revision
   serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
   help        Show this help
@@ -73,6 +76,14 @@ INSTALL OPTIONS:
                                Ed25519 public key for the anchor
   --json                       print preview JSON
 
+UPGRADE / ROLLBACK OPTIONS:
+  upgrade <id> --ref <ref>     preview an upgrade target
+  rollback <id> --to <ref>     preview a rollback target
+  --accounts-url <url>         Takosumi Accounts URL
+  --git-url <url>              source Git URL override
+  --apply                      POST the revision to Takosumi Accounts
+  --json                       print JSON
+
 HISTORY OPTIONS:
   --cwd <dir>                  git repository root (default .)
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
@@ -118,6 +129,12 @@ export async function run(args: readonly string[]): Promise<number> {
   }
   if (first === "install") {
     return await runInstallCli(rest);
+  }
+  if (first === "upgrade") {
+    return await runUpgradeCli(rest);
+  }
+  if (first === "rollback") {
+    return await runRollbackCli(rest);
   }
   if (first === "history") {
     return await runHistoryCli(rest);
