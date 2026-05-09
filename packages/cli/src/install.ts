@@ -40,6 +40,21 @@ export const INSTALLABLE_APP_PERMISSIONS = [
   "deploy.intent.write",
   "logs.read.own",
   "billing.usage.report",
+  "spaces:read",
+  "spaces:write",
+  "files:read",
+  "files:write",
+  "memories:read",
+  "memories:write",
+  "threads:read",
+  "threads:write",
+  "runs:read",
+  "runs:write",
+  "agents:execute",
+  "repos:read",
+  "repos:write",
+  "mcp:invoke",
+  "events:subscribe",
 ] as const;
 
 const UPGRADE_POLICIES = ["automatic", "ask", "manual"] as const;

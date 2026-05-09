@@ -127,6 +127,40 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   assert(preview.permissionDigest.startsWith("sha256:"));
 });
 
+Deno.test("parseInstallableAppYaml accepts Takos resource AppGrant scopes", () => {
+  const app = parseInstallableAppYaml(
+    VALID_APP_YML.replace(
+      `    - app.profile.write
+    - logs.read.own`,
+      `    - files:read
+    - files:write
+    - threads:read
+    - threads:write
+    - runs:read
+    - runs:write
+    - agents:execute
+    - repos:read
+    - repos:write
+    - mcp:invoke
+    - events:subscribe`,
+    ),
+  );
+
+  assertEquals(app.permissions.requested, [
+    "files:read",
+    "files:write",
+    "threads:read",
+    "threads:write",
+    "runs:read",
+    "runs:write",
+    "agents:execute",
+    "repos:read",
+    "repos:write",
+    "mcp:invoke",
+    "events:subscribe",
+  ]);
+});
+
 Deno.test("parseInstallableAppYaml accepts service import metadata", () => {
   const app = parseInstallableAppYaml(
     VALID_APP_YML.replace(

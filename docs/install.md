@@ -55,6 +55,10 @@ The preview response is `takosumi-git.install-preview@v1` and includes:
 - permission digest
 - compatibility warnings
 
+The AppGrant catalog includes generic installer capabilities such as
+`deploy.intent.write` plus Takos resource scopes such as `files:read`,
+`threads:write`, `agents:execute`, `mcp:invoke`, and `events:subscribe`.
+
 Preview is non-mutating. It does not call Takosumi Accounts and does not call
 the takosumi kernel.
 
