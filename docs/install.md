@@ -101,7 +101,8 @@ a Git source plus ledger target fields:
 
 The response kind is `takosumi-git.install-apply@v1`. The JSON response also
 includes `accounts.installationId`, returned `accounts.bindings[]`, and
-`accounts.oidcClient` when Accounts materialized an OIDC client during create.
+`accounts.runtimeBinding`. It also includes `accounts.oidcClient` when Accounts
+materialized an OIDC client during create.
 
 ## Apply
 

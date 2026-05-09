@@ -665,12 +665,20 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
         requests.push(new Request(input, init));
         return Promise.resolve(Response.json({
           installation: { id: "inst_1" },
+          runtime_binding: {
+            target_type: "shared-cell",
+            target_id: "shared-cell://tokyo-cell-01/namespaces/inst_1",
+          },
         }, { status: 202 }));
       },
     });
 
     assertEquals(result.response.status, 202);
     assertEquals(result.accounts.installationId, "inst_1");
+    assertEquals(result.accounts.runtimeBinding, {
+      target_type: "shared-cell",
+      target_id: "shared-cell://tokyo-cell-01/namespaces/inst_1",
+    });
     assertEquals(result.accounts.bindings, []);
     assertEquals(requests.length, 1);
     assertEquals(requests[0].url, "http://accounts.example/v1/installations");

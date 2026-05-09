@@ -2302,6 +2302,7 @@ export interface InstallApplyResult {
 
 export interface AccountsInstallResponseSummary {
   readonly installationId?: string;
+  readonly runtimeBinding?: Record<string, unknown>;
   readonly bindings: readonly Record<string, unknown>[];
   readonly oidcClient?: Record<string, unknown>;
   readonly oidcClientSecret?: string;
@@ -2993,10 +2994,14 @@ export async function runInstallCli(args: readonly string[]): Promise<number> {
 
 function renderApplyResult(result: InstallApplyResult): string {
   const installationId = result.accounts.installationId ?? "(unknown)";
+  const runtimeBinding = renderRuntimeBindingSummary(
+    result.accounts.runtimeBinding,
+  );
   return [
     "takosumi-git install apply",
     `app: ${result.preview.app.name} (${result.preview.app.id})`,
     `installation: ${installationId}`,
+    ...(runtimeBinding ? [`runtime: ${runtimeBinding}`] : []),
     `accounts response: HTTP ${result.response.status}`,
     ...(result.deployment
       ? [`kernel response: HTTP ${result.deployment.status}`]
@@ -3026,15 +3031,35 @@ function readAccountsInstallResponse(
     "oidcClientSecret",
   );
   const bindingEnv = stringRecordProperty(record, "binding_env", "bindingEnv");
+  const runtimeBinding = isRecord(record.runtime_binding)
+    ? record.runtime_binding
+    : isRecord(record.runtimeBinding)
+    ? record.runtimeBinding
+    : undefined;
   return {
     ...(readInstallationId(body)
       ? { installationId: readInstallationId(body) }
       : {}),
+    ...(runtimeBinding ? { runtimeBinding } : {}),
     bindings,
     ...(oidcClient ? { oidcClient } : {}),
     ...(oidcClientSecret ? { oidcClientSecret } : {}),
     ...(bindingEnv ? { bindingEnv } : {}),
   };
+}
+
+function renderRuntimeBindingSummary(
+  runtimeBinding: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!runtimeBinding) return undefined;
+  const targetType = stringProperty(
+    runtimeBinding,
+    "target_type",
+    "targetType",
+  );
+  const targetId = stringProperty(runtimeBinding, "target_id", "targetId");
+  if (!targetType && !targetId) return undefined;
+  return [targetType, targetId].filter(Boolean).join(" ");
 }
 
 function readInstallationId(body: unknown): string | undefined {
