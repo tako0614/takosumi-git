@@ -205,6 +205,12 @@ keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`,
 `DATABASE_URL`, `BLOB_*`, `DEPLOY_INTENT_*`, `TAKOS_INSTALLATION_ID`, and
 `INSTALL_LAUNCH_*` are filled.
 
+If a required provider-backed binding (`database.postgres@v1`,
+`object-store.s3-compatible@v1`, `domain.http@v1`, or `deploy-intent.gitops@v1`)
+still has its pending `takosumi-git://...` ref when a kernel deploy is
+requested, `install apply` fails before `POST /v1/deployments`. For bindings
+with default env, the required `binding_env` keys must also be present.
+
 ## Service Imports
 
 `serviceImports[]` is installer-facing metadata for external Takosumi services

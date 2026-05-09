@@ -2185,6 +2185,7 @@ export async function applyInstall(
     if (launchTokenConfig) {
       accounts = { ...accounts, launchTokenConfig };
     }
+    assertRequiredProviderBindingsMaterialized(app, accounts);
     const deployRequest = buildInstallDeployRequest(
       compiledManifest,
       options.serviceResolvers ?? [],
@@ -2295,6 +2296,72 @@ function appRequiresLaunchTokenConfig(app: InstallableApp): boolean {
   return Object.values(app.bindings).some((binding) =>
     binding.type === "install-launch-token@v1" && binding.required
   );
+}
+
+function assertRequiredProviderBindingsMaterialized(
+  app: InstallableApp,
+  accounts: AccountsInstallResponseSummary,
+): void {
+  const accountsBindings = new Map(
+    accounts.bindings
+      .map((binding) => {
+        const name = stringProperty(binding, "name", "name");
+        return name ? [name, binding] as const : undefined;
+      })
+      .filter((entry): entry is readonly [string, Record<string, unknown>] =>
+        entry !== undefined
+      ),
+  );
+  const missing: string[] = [];
+  for (const [name, binding] of Object.entries(app.bindings)) {
+    if (!binding.required || !isProviderBackedBinding(binding.type)) continue;
+    const record = accountsBindings.get(name);
+    const configRef = record
+      ? stringProperty(record, "config_ref", "configRef")
+      : undefined;
+    if (!configRef || configRef.startsWith("takosumi-git://")) {
+      missing.push(`${name}:${binding.type}:configRef`);
+    }
+    for (const envKey of requiredBindingEnvKeys(binding.type)) {
+      if (!hasEnvKey(accounts.bindingEnv ?? {}, envKey)) {
+        missing.push(`${name}:${binding.type}:${envKey}`);
+      }
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `required AppBinding materialization is missing: ${missing.join(", ")}`,
+    );
+  }
+}
+
+function isProviderBackedBinding(type: InstallableAppBindingType): boolean {
+  return type === "database.postgres@v1" ||
+    type === "object-store.s3-compatible@v1" ||
+    type === "domain.http@v1" ||
+    type === "deploy-intent.gitops@v1";
+}
+
+function requiredBindingEnvKeys(
+  type: InstallableAppBindingType,
+): readonly string[] {
+  if (type === "database.postgres@v1") return ["DATABASE_URL"];
+  if (type === "object-store.s3-compatible@v1") {
+    return [
+      "BLOB_ENDPOINT",
+      "BLOB_BUCKET",
+      "BLOB_ACCESS_KEY",
+      "BLOB_SECRET_KEY",
+    ];
+  }
+  if (type === "deploy-intent.gitops@v1") {
+    return [
+      "DEPLOY_INTENT_DRIVER",
+      "DEPLOY_INTENT_REMOTE",
+      "DEPLOY_INTENT_TOKEN",
+    ];
+  }
+  return [];
 }
 
 function buildInstallDeployRequest(

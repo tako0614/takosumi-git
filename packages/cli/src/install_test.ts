@@ -751,6 +751,14 @@ resources:
             config_ref:
               "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
             secret_refs: [],
+          }, {
+            name: "database",
+            kind: "database.postgres@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/database/postgres/main",
+            secret_refs: [
+              "takosumi-accounts://installations/inst_1/bindings/database/secrets/password",
+            ],
           }],
           oidc_client_secret: "client-secret",
           oidc_client: {
@@ -873,6 +881,71 @@ resources:
   }
 });
 
+Deno.test("applyInstall rejects missing required provider binding materialization", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: root,
+          appPath: join(root, ".takosumi", "app.yml"),
+          json: true,
+          accountsUrl: "http://accounts.example/",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+          runtimeBaseUrl: "http://localhost:8787",
+          endpoint: "http://kernel.example/",
+          deployToken: "deploy-secret",
+          fetch: (input, init) => {
+            requests.push(new Request(input, init));
+            const url = String(input);
+            if (url.endsWith("/v1/installations/inst_1/launch-token")) {
+              return Promise.resolve(Response.json({
+                env: {
+                  INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+                  INSTALL_LAUNCH_AUDIENCE: "example.hello",
+                  INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+                },
+              }));
+            }
+            return Promise.resolve(Response.json({
+              installation: { id: "inst_1" },
+              bindings: [{
+                name: "database",
+                kind: "database.postgres@v1",
+                config_ref:
+                  "takosumi-git://installable-app/example.hello/bindings/database/sha256:pending",
+                secret_refs: [],
+              }],
+            }, { status: 202 }));
+          },
+        }),
+      Error,
+      "required AppBinding materialization is missing",
+    );
+    assertEquals(requests.length, 2);
+    assertEquals(
+      requests.some((request) => request.url.includes("/v1/deployments")),
+      false,
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("runInstallCli returns failure when kernel deploy fails", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
   const originalFetch = globalThis.fetch;
@@ -917,6 +990,19 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
       }
       return Promise.resolve(Response.json({
         installation: { id: "inst_1" },
+        binding_env: {
+          DATABASE_URL:
+            "postgres://takos:secret@db.example.test:5432/takos?sslmode=require",
+        },
+        bindings: [{
+          name: "database",
+          kind: "database.postgres@v1",
+          config_ref:
+            "takosumi-accounts://installations/inst_1/bindings/database/postgres/main",
+          secret_refs: [
+            "takosumi-accounts://installations/inst_1/bindings/database/secrets/password",
+          ],
+        }],
       }, { status: 202 }));
     }) as typeof fetch;
     (Deno.stdout as { writeSync: (p: Uint8Array) => number }).writeSync = (
