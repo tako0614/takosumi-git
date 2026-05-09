@@ -615,6 +615,8 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
     });
 
     assertEquals(result.response.status, 202);
+    assertEquals(result.accounts.installationId, "inst_1");
+    assertEquals(result.accounts.bindings, []);
     assertEquals(requests.length, 1);
     assertEquals(requests[0].url, "http://accounts.example/v1/installations");
     assertEquals(requests[0].headers.get("authorization"), "Bearer secret");
@@ -701,6 +703,20 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
         }
         return Promise.resolve(Response.json({
           installation: { id: "inst_1" },
+          bindings: [{
+            name: "auth",
+            kind: "identity.oidc@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/auth/oidc-client/toc_1",
+            secret_refs: [
+              "takosumi-accounts://installations/inst_1/bindings/auth/secrets/client-secret",
+            ],
+          }],
+          oidc_client: {
+            client_id: "toc_1",
+            installation_id: "inst_1",
+            service_id: "takosumi.account.auth@v1",
+          },
         }, { status: 202 }));
       },
     });
@@ -711,6 +727,12 @@ Deno.test("applyInstall posts service import materialization plan", async () => 
     );
     assertEquals(result.deployment?.status, 200);
     assertEquals(result.statusTransition?.status, 200);
+    assertEquals(result.accounts.installationId, "inst_1");
+    assertEquals(
+      result.accounts.bindings[0]?.config_ref,
+      "takosumi-accounts://installations/inst_1/bindings/auth/oidc-client/toc_1",
+    );
+    assertEquals(result.accounts.oidcClient?.client_id, "toc_1");
     assertEquals(requests.length, 3);
     const body = await requests[0].json();
     assertEquals(body.serviceImports, [{

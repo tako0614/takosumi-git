@@ -347,6 +347,7 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
     const body = await response.json();
     assertEquals(body.kind, "takosumi-git.install-apply@v1");
     assertEquals(body.response.status, 202);
+    assertEquals(body.accounts.installationId, "inst_1");
     assertEquals(requests.length, 3);
     assertEquals(requests[0].url, "http://accounts.example/v1/installations");
     assertEquals(

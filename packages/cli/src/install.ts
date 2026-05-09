@@ -1984,6 +1984,7 @@ export async function previewInstall(
 export interface InstallApplyResult {
   readonly preview: InstallPreview;
   readonly request: Record<string, unknown>;
+  readonly accounts: AccountsInstallResponseSummary;
   readonly response: {
     readonly status: number;
     readonly body: unknown;
@@ -1993,6 +1994,12 @@ export interface InstallApplyResult {
     readonly status: number;
     readonly body: unknown;
   };
+}
+
+export interface AccountsInstallResponseSummary {
+  readonly installationId?: string;
+  readonly bindings: readonly Record<string, unknown>[];
+  readonly oidcClient?: Record<string, unknown>;
 }
 
 function appBindingCreateRequests(
@@ -2151,6 +2158,7 @@ export async function applyInstall(
   if (response.status >= 400) {
     throw new InstallApplyError(response.status, body);
   }
+  const accounts = readAccountsInstallResponse(body);
   let deployment: DeployResponse | undefined;
   let statusTransition:
     | { readonly status: number; readonly body: unknown }
@@ -2159,7 +2167,7 @@ export async function applyInstall(
     if (!deployEndpoint || !deployToken) {
       throw new Error("kernel deploy endpoint and token are required");
     }
-    const installationId = readInstallationId(body);
+    const installationId = accounts.installationId;
     if (!installationId) {
       throw new Error(
         "accounts response missing installation id for deploy status transition",
@@ -2197,6 +2205,7 @@ export async function applyInstall(
   return {
     preview,
     request,
+    accounts,
     response: {
       status: response.status,
       body,
@@ -2384,8 +2393,7 @@ export async function runInstallCli(args: readonly string[]): Promise<number> {
 }
 
 function renderApplyResult(result: InstallApplyResult): string {
-  const installationId = readInstallationId(result.response.body) ??
-    "(unknown)";
+  const installationId = result.accounts.installationId ?? "(unknown)";
   return [
     "takosumi-git install apply",
     `app: ${result.preview.app.name} (${result.preview.app.id})`,
@@ -2399,6 +2407,27 @@ function renderApplyResult(result: InstallApplyResult): string {
       : []),
     "",
   ].join("\n");
+}
+
+function readAccountsInstallResponse(
+  body: unknown,
+): AccountsInstallResponseSummary {
+  const record = isRecord(body) ? body : {};
+  const bindings = Array.isArray(record.bindings)
+    ? record.bindings.filter(isRecord)
+    : [];
+  const oidcClient = isRecord(record.oidc_client)
+    ? record.oidc_client
+    : isRecord(record.oidcClient)
+    ? record.oidcClient
+    : undefined;
+  return {
+    ...(readInstallationId(body)
+      ? { installationId: readInstallationId(body) }
+      : {}),
+    bindings,
+    ...(oidcClient ? { oidcClient } : {}),
+  };
 }
 
 function readInstallationId(body: unknown): string | undefined {
