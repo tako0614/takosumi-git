@@ -6,7 +6,7 @@
  */
 
 import { parseArgs } from "@std/cli/parse-args";
-import { isAbsolute, join } from "@std/path";
+import { dirname, isAbsolute, join } from "@std/path";
 import type { WorkflowEvent } from "@takos/takosumi-git-workflow-contract";
 import { eventFromGitPush } from "@takos/takosumi-git-source";
 import {
@@ -31,6 +31,7 @@ import {
 } from "./install.ts";
 
 export type WebhookProvider = "github" | "gitlab" | "gitea";
+export type WebhookMode = "push" | "install";
 
 export interface ServeOptions {
   readonly host: string;
@@ -47,6 +48,7 @@ export interface ServeOptions {
   readonly accountId?: string;
   readonly spaceId?: string;
   readonly subject?: string;
+  readonly webhookMode?: WebhookMode;
   readonly runtimeBaseUrl?: string;
   readonly deployToken?: string;
   readonly rateLimit: number;
@@ -73,6 +75,7 @@ const DEFAULT_MANIFEST = ".takosumi/manifest.yml";
 const DEFAULT_WORKFLOWS_DIR = ".takosumi/workflows";
 const DEFAULT_RATE_LIMIT = 60;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
+const fullCommitPattern = /^[0-9a-f]{40}$/;
 
 function headerValue(headers: Headers, name: string): string {
   return headers.get(name) ?? "";
@@ -565,8 +568,6 @@ function hasBearerToken(request: Request, token: string): boolean {
   return header === `Bearer ${token}`;
 }
 
-const fullCommitPattern = /^[0-9a-f]{40}$/;
-
 function parseOptionalSourceCommit(
   value: string | undefined,
 ): string | undefined {
@@ -622,6 +623,10 @@ function pathFromSpec(cwd: string, spec: string): string {
 
 function defaultDispatch(options: ServeOptions): WebhookDispatch {
   return async (job) => {
+    if ((options.webhookMode ?? "push") === "install") {
+      await dispatchInstallWebhook(options, job);
+      return;
+    }
     await push({
       endpoint: options.endpoint,
       token: options.token,
@@ -634,6 +639,56 @@ function defaultDispatch(options: ServeOptions): WebhookDispatch {
       event: job.event,
     });
   };
+}
+
+async function dispatchInstallWebhook(
+  options: ServeOptions,
+  job: WebhookDispatchJob,
+): Promise<void> {
+  if (
+    !options.accountsUrl || !options.accountsToken || !options.accountId ||
+    !options.spaceId || !options.subject
+  ) {
+    throw new Error(
+      "webhook install mode requires accounts URL, accounts token, account id, space id, and subject",
+    );
+  }
+  const cwd = Deno.cwd();
+  const manifestPath = pathFromSpec(cwd, options.manifestPath);
+  const projectRoot = dirname(dirname(manifestPath));
+  const sourceCommit = eventCommit(job.event);
+  await applyInstall({
+    subcommand: "apply",
+    cwd: projectRoot,
+    appPath: join(projectRoot, ".takosumi", "app.yml"),
+    manifestPath,
+    json: true,
+    accountsUrl: options.accountsUrl,
+    token: options.accountsToken,
+    accountId: options.accountId,
+    spaceId: options.spaceId,
+    createdBySubject: options.subject,
+    ...(sourceCommit ? { sourceCommit } : {}),
+    ...(options.runtimeBaseUrl
+      ? { runtimeBaseUrl: options.runtimeBaseUrl }
+      : {}),
+    endpoint: options.endpoint,
+    deployToken: options.deployToken ?? options.token,
+    serviceResolvers: options.serviceResolvers,
+    ...(options.installApplyFetch ? { fetch: options.installApplyFetch } : {}),
+  });
+}
+
+function eventCommit(event: WorkflowEvent): string | undefined {
+  const commit = isRecord(event.payload)
+    ? typeof event.payload.commit === "string" ? event.payload.commit : ""
+    : "";
+  return fullCommitPattern.test(commit) ? commit : undefined;
+}
+
+function parseWebhookMode(value: string): WebhookMode {
+  if (value === "push" || value === "install") return value;
+  throw new Error("--webhook-mode must be push or install");
 }
 
 function parsePositiveInt(raw: unknown, field: string): number {
@@ -657,6 +712,7 @@ export function parseServeArgs(
       "manifest",
       "workflows-dir",
       "webhook-secret",
+      "webhook-mode",
       "artifact-contract",
       "service-resolver-url",
       "service-resolver-public-key",
@@ -687,6 +743,10 @@ export function parseServeArgs(
     env.get("TAKOSUMI_TOKEN") ?? "";
   const webhookSecret = (flags["webhook-secret"] as string | undefined) ??
     env.get("TAKOSUMI_GIT_WEBHOOK_SECRET") ?? "";
+  const webhookMode = parseWebhookMode(
+    (flags["webhook-mode"] as string | undefined) ??
+      env.get("TAKOSUMI_GIT_WEBHOOK_MODE") ?? "push",
+  );
   const serviceResolverUrl = (flags["service-resolver-url"] as
     | string
     | undefined) ??
@@ -723,6 +783,14 @@ export function parseServeArgs(
       "missing --webhook-secret (or TAKOSUMI_GIT_WEBHOOK_SECRET)",
     );
   }
+  if (
+    webhookMode === "install" &&
+    (!accountsUrl || !accountsToken || !accountId || !spaceId || !subject)
+  ) {
+    throw new Error(
+      "--webhook-mode install requires --accounts-url, --accounts-token, --account-id, --space-id, and --subject",
+    );
+  }
   return {
     host: flags.host as string,
     port: parsePositiveInt(flags.port, "--port"),
@@ -731,6 +799,7 @@ export function parseServeArgs(
     manifestPath: flags.manifest as string,
     workflowsDir: flags["workflows-dir"] as string,
     webhookSecret,
+    webhookMode,
     artifactContract: parseArtifactContract(flags["artifact-contract"]),
     ...(serviceResolverUrl && serviceResolverPublicKey
       ? {

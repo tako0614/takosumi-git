@@ -48,6 +48,27 @@ the same process.
 Rate limiting is also in memory and defaults to 60 requests per 60 seconds per
 `X-Forwarded-For` key.
 
+## Webhook Dispatch Mode
+
+By default, verified git webhooks enqueue `takosumi-git push` dispatches.
+Operators can instead route webhook deliveries through the install pipeline:
+
+```bash
+takosumi-git serve \
+  --webhook-mode install \
+  --accounts-url "$TAKOSUMI_ACCOUNTS_URL" \
+  --accounts-token "$TAKOSUMI_ACCOUNTS_TOKEN" \
+  --account-id "$TAKOS_ACCOUNT_ID" \
+  --space-id "$TAKOS_SPACE_ID" \
+  --subject "$TAKOSUMI_SUBJECT"
+```
+
+Install webhook mode reads local `.takosumi/app.yml`, uses the webhook commit as
+the `source.commit` pin when it is a full 40-character SHA, runs
+`install
+apply`, optionally deploys to the configured kernel endpoint, and
+patches the AppInstallation status.
+
 ## Install API
 
 `POST /v1/install/preview` accepts the same preview body documented in

@@ -96,6 +96,8 @@ SERVE OPTIONS:
   --endpoint <url>             takosumi kernel endpoint (or TAKOSUMI_ENDPOINT)
   --token <token>              bearer token (or TAKOSUMI_TOKEN)
   --webhook-secret <secret>    HMAC secret (or TAKOSUMI_GIT_WEBHOOK_SECRET)
+  --webhook-mode <push|install>
+                               dispatch verified webhooks through push or install
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
   --artifact-contract <v0|v1|auto>
