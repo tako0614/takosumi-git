@@ -13,6 +13,7 @@ import { runInitCli } from "./init.ts";
 import { runHistoryCli } from "./history.ts";
 import { runServeCli } from "./serve.ts";
 import { runInstallCli } from "./install.ts";
+import { runExportCli, runMaterializeCli } from "./lifecycle.ts";
 import { runRollbackCli, runUpgradeCli } from "./revision.ts";
 
 const VERSION = "0.3.0";
@@ -30,6 +31,8 @@ COMMANDS:
   install     Install .takosumi/app.yml metadata from a local repo or Git URL
   upgrade     Preview or apply an AppInstallation source revision
   rollback    Preview or apply an AppInstallation rollback revision
+  materialize Request shared-cell to dedicated materialization
+  export      Request a self-host export bundle operation
   serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
   help        Show this help
@@ -82,6 +85,15 @@ UPGRADE / ROLLBACK OPTIONS:
   --accounts-url <url>         Takosumi Accounts URL
   --git-url <url>              source Git URL override
   --apply                      POST the revision to Takosumi Accounts
+  --json                       print JSON
+
+MATERIALIZE / EXPORT OPTIONS:
+  materialize <id> --region <region> --cost-ack
+                               request dedicated runtime materialization
+  export <id>                  request a pending self-host bundle export
+  --accounts-url <url>         Takosumi Accounts URL
+  --token <token>              bearer token (or TAKOSUMI_ACCOUNTS_TOKEN/TAKOS_TOKEN)
+  --idempotency-key <key>      idempotency key (default random UUID)
   --json                       print JSON
 
 HISTORY OPTIONS:
@@ -137,6 +149,12 @@ export async function run(args: readonly string[]): Promise<number> {
   }
   if (first === "rollback") {
     return await runRollbackCli(rest);
+  }
+  if (first === "materialize") {
+    return await runMaterializeCli(rest);
+  }
+  if (first === "export") {
+    return await runExportCli(rest);
   }
   if (first === "history") {
     return await runHistoryCli(rest);

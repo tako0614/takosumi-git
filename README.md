@@ -37,24 +37,27 @@ takes manifests by explicit path or HTTP body and has no opinion on file layout
 
 ## Status
 
-`takosumi-git init`, `push`, `install`, `upgrade`, `rollback`, `serve`, and
-`history` are implemented. `init` scaffolds the `.takosumi/` project layout
-(`app.yml` + `manifest.yml` + `workflows/build.yml`). `push` parses
-`.takosumi/manifest.yml` (a takosumi v1 manifest envelope), resolves each
-`resources[i].workflowRef` by running the referenced workflow job's steps (via
-`bash -lc`) and reading the v1 `TAKOSUMI_ARTIFACT=<uri>` stdout marker,
-substitutes the resolved artifact URI into that resource entry's `spec.image`
-field, strips the private `workflowRef` extension, attaches resource-level
-provenance metadata plus a top-level deployment provenance chain, and posts the
-cleaned manifest to a takosumi kernel via `POST /v1/deployments`. `install`
-previews `.takosumi/app.yml`, creates an AppInstallation in Takosumi Accounts,
-can deploy the compiled manifest to a kernel, injects materialized runtime env,
-and patches installation status. `upgrade` / `rollback` preview or apply source
-revision changes through the Accounts ledger. `history` lists manifest commits
-and renders per-resource semantic diffs. `serve` exposes GitHub / GitLab / Gitea
-webhook routes with signature verification, rate limiting, delivery dedup, queue
-draining, push dispatch, and install preview/apply HTTP APIs. See
-[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
+`takosumi-git init`, `push`, `install`, `upgrade`, `rollback`, `materialize`,
+`export`, `serve`, and `history` are implemented. `init` scaffolds the
+`.takosumi/` project layout (`app.yml` + `manifest.yml` +
+`workflows/build.yml`). `push` parses `.takosumi/manifest.yml` (a takosumi v1
+manifest envelope), resolves each `resources[i].workflowRef` by running the
+referenced workflow job's steps (via `bash -lc`) and reading the v1
+`TAKOSUMI_ARTIFACT=<uri>` stdout marker, substitutes the resolved artifact URI
+into that resource entry's `spec.image` field, strips the private `workflowRef`
+extension, attaches resource-level provenance metadata plus a top-level
+deployment provenance chain, and posts the cleaned manifest to a takosumi kernel
+via `POST /v1/deployments`. `install` previews `.takosumi/app.yml`, creates an
+AppInstallation in Takosumi Accounts, can deploy the compiled manifest to a
+kernel, injects materialized runtime env, and patches installation status.
+`upgrade` / `rollback` preview or apply source revision changes through the
+Accounts ledger. `materialize` requests shared-cell to dedicated runtime
+materialization, and `export` requests a self-host bundle operation through
+Takosumi Accounts. `history` lists manifest commits and renders per-resource
+semantic diffs. `serve` exposes GitHub / GitLab / Gitea webhook routes with
+signature verification, rate limiting, delivery dedup, queue draining, push
+dispatch, and install preview/apply HTTP APIs. See [AGENTS.md](./AGENTS.md) for
+package layout and design boundaries.
 
 ## Docs
 

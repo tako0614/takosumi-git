@@ -303,3 +303,36 @@ POST /v1/installations/{installation-id}/rollback
 
 Takosumi Accounts updates the AppInstallation source pin and appends an
 `installation.upgraded` or `installation.rolled_back` event to the hash chain.
+
+## Materialize and export
+
+`takosumi-git materialize` and `takosumi-git export` are thin clients for the
+Takosumi Accounts lifecycle API. They request the operation and return the
+operation tracking URL; provider workers complete the runtime move or bundle
+creation asynchronously.
+
+```bash
+takosumi-git materialize inst_01J... \
+  --accounts-url http://127.0.0.1:8787 \
+  --region tokyo \
+  --compute small \
+  --database small \
+  --object-store standard \
+  --cost-ack
+
+takosumi-git export inst_01J... \
+  --accounts-url http://127.0.0.1:8787 \
+  --include-data \
+  --encryption-method age \
+  --recipient age1...
+```
+
+The CLI posts:
+
+```text
+POST /v1/installations/{installation-id}/materialize
+POST /v1/installations/{installation-id}/export
+```
+
+Both commands send an `Idempotency-Key` header. Pass `--idempotency-key` to
+reuse a known key across retries.
