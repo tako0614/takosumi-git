@@ -58,6 +58,21 @@ The preview response is `takosumi-git.install-preview@v1` and includes:
 Preview is non-mutating. It does not call Takosumi Accounts and does not call
 the takosumi kernel.
 
+When running `takosumi-git serve`, the same preview surface is available as a
+non-mutating API. The body can provide inline `appYml` / `manifestYml`, or a Git
+source:
+
+```text
+POST /v1/install/preview
+```
+
+```json
+{
+  "gitUrl": "https://github.com/example/hello",
+  "ref": "v1.2.3"
+}
+```
+
 ## Apply
 
 Use apply after the source has a concrete commit pin:

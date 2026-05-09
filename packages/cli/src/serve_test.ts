@@ -1,4 +1,5 @@
 import { assertEquals } from "@std/assert";
+import { join } from "@std/path";
 import {
   createServeHandler,
   hmacSha256Hex,
@@ -211,6 +212,62 @@ Deno.test("serve exposes non-mutating install preview API", async () => {
   assertEquals(body.app.id, "example.hello");
   assertEquals(body.source.pinned, true);
   assertEquals(body.permissions.requested, ["logs.read.own"]);
+});
+
+Deno.test("serve preview API accepts Git URL source", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-serve-preview-",
+  });
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi"));
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      'apiVersion: "1.0"\nkind: Manifest\nresources: []\n',
+    );
+    const handler = createServeHandler({
+      ...baseOptions(),
+      installPreviewCheckoutSource: (request) => {
+        assertEquals(request, {
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+        });
+        return Promise.resolve({
+          root: checkoutRoot,
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          cleanup: () => Promise.resolve(),
+        });
+      },
+    });
+
+    const response = await handler(
+      new Request("http://localhost/v1/install/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+        }),
+      }),
+    );
+
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.kind, "takosumi-git.install-preview@v1");
+    assertEquals(
+      body.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+    assertEquals(
+      body.source.compiledManifestDigest.startsWith("sha256:"),
+      true,
+    );
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
 });
 
 Deno.test("serve preview API returns validation issues", async () => {

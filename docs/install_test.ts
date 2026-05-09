@@ -16,6 +16,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "takosumi-git install preview",
       "takosumi-git install preview https://github.com/example/hello --ref v1.2.3",
       "takosumi-git.install-preview@v1",
+      "POST /v1/install/preview",
+      '"gitUrl": "https://github.com/example/hello"',
       "takosumi-git install apply",
       "takosumi-git install apply https://github.com/example/hello",
       "POST /v1/installations",

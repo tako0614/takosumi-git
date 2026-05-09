@@ -19,8 +19,10 @@ import {
   compileInstallManifest,
   digestText,
   InstallableAppValidationError,
+  type InstallSourceCheckoutFactory,
   parseInstallableAppObject,
   parseInstallableAppYaml,
+  previewInstall,
 } from "./install.ts";
 
 export type WebhookProvider = "github" | "gitlab" | "gitea";
@@ -37,6 +39,7 @@ export interface ServeOptions {
   readonly serviceResolvers?: readonly ServiceResolverConfig[];
   readonly rateLimit: number;
   readonly rateLimitWindowMs: number;
+  readonly installPreviewCheckoutSource?: InstallSourceCheckoutFactory;
   readonly waitForDispatch?: boolean;
   readonly dispatch?: WebhookDispatch;
 }
@@ -280,7 +283,10 @@ export function createServeHandler(
       if (!limiter.allow(rateLimitKey(request))) {
         return json({ error: "rate_limited" }, 429);
       }
-      return await handleInstallPreviewRequest(request);
+      return await handleInstallPreviewRequest(
+        request,
+        options.installPreviewCheckoutSource,
+      );
     }
     if (request.method !== "POST") return json({ error: "not_found" }, 404);
     const provider = providerFromPath(url.pathname);
@@ -330,6 +336,7 @@ export function createServeHandler(
 
 async function handleInstallPreviewRequest(
   request: Request,
+  checkoutSource?: InstallSourceCheckoutFactory,
 ): Promise<Response> {
   let body: unknown;
   try {
@@ -340,6 +347,38 @@ async function handleInstallPreviewRequest(
   if (!isRecord(body)) return json({ error: "invalid_json" }, 400);
 
   try {
+    const gitUrl = optionalBodyString(body, "gitUrl", "git_url");
+    if (gitUrl) {
+      const ref = optionalBodyString(body, "ref");
+      if (!ref) {
+        return json({
+          error: "invalid_install_preview_request",
+          message: "gitUrl and ref are required",
+        }, 400);
+      }
+      const appPath = optionalBodyString(body, "appPath", "app_path") ??
+        ".takosumi/app.yml";
+      const manifestPath = optionalBodyString(
+        body,
+        "manifestPath",
+        "manifest_path",
+      );
+      const preview = await previewInstall({
+        subcommand: "preview",
+        cwd: Deno.cwd(),
+        appPath,
+        appPathSpec: appPath,
+        ...(manifestPath
+          ? { manifestPath, manifestPathSpec: manifestPath }
+          : {}),
+        json: true,
+        sourceGitUrl: gitUrl,
+        sourceRef: ref,
+        ...(checkoutSource ? { checkoutSource } : {}),
+      });
+      return json(preview as unknown as Record<string, unknown>, 200);
+    }
+
     const appYaml = typeof body.appYml === "string"
       ? body.appYml
       : typeof body.app_yml === "string"
@@ -372,6 +411,15 @@ async function handleInstallPreviewRequest(
     }
     return json({ error: "invalid_install_preview_request" }, 400);
   }
+}
+
+function optionalBodyString(
+  body: Record<string, unknown>,
+  key: string,
+  alternateKey?: string,
+): string | undefined {
+  const value = body[key] ?? (alternateKey ? body[alternateKey] : undefined);
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function defaultDispatch(options: ServeOptions): WebhookDispatch {
