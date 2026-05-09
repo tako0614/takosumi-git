@@ -252,6 +252,12 @@ marker contract as `takosumi-git push`. The compiled manifest sent to
 `POST /v1/deployments` has `workflowRef` stripped, and any `spec.image` value
 must be digest-pinned as `<image>@sha256:<64-hex>`.
 
+Install workflow steps run with a cleared process environment and a small
+non-secret allowlist. Operator runtime secrets such as `TAKOS_TOKEN`,
+`TAKOSUMI_DEPLOY_TOKEN`, `OIDC_CLIENT_SECRET`, and `DATABASE_URL` are not
+inherited by build steps. The installer uses the same build environment contract
+documented in [Artifact URI Contract](./artifact-contract.md).
+
 ## Installer Placeholders
 
 Compiled manifests must not carry installer-only placeholders. If
