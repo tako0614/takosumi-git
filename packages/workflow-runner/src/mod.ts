@@ -4,10 +4,10 @@
  * Executes a `WorkflowFile` job, resolves its artifact URI, and returns the
  * `ResolvedArtifact` so that a manifest can be generated against it.
  *
- * Phase 2 skeleton: actual subprocess / build execution is stubbed. The
- * runner accepts an injected step executor so tests can drive the flow
- * without spawning processes, and so a future implementation can wire in
- * containerd / docker / native exec without touching this module's API.
+ * The runner owns job sequencing and artifact resolution. Process/container
+ * sandbox policy lives in the injected step executor so CLI, serve, and future
+ * hosted runners can choose their own isolation boundary without changing this
+ * package's contract.
  */
 
 import type {

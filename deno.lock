@@ -60,6 +60,7 @@
       },
       "packages/workflow-runner": {
         "dependencies": [
+          "jsr:@std/assert@1",
           "jsr:@takos/takosumi-git-workflow-contract@^0.0.1"
         ]
       }
