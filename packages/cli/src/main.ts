@@ -98,7 +98,7 @@ UPGRADE / ROLLBACK OPTIONS:
   --json                       print JSON
 
 MATERIALIZE / EXPORT OPTIONS:
-  materialize <id> --region <region> --cost-ack
+  materialize <id> --mode dedicated --region <region> --cost-ack
                                request dedicated runtime materialization
   export <id>                  request a pending self-host bundle export
   --accounts-url <url>         Takosumi Accounts URL

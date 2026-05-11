@@ -64,6 +64,7 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "installation.upgraded",
       "installation.rolled_back",
       "takosumi-git materialize inst_01J",
+      "--mode dedicated",
       "takosumi-git export inst_01J",
       "--output ./takos-export.tar.zst",
       "POST /v1/installations/{installation-id}/materialize",

@@ -11,6 +11,7 @@ export interface ParsedLifecycleArgs {
   readonly idempotencyKey: string;
   readonly json: boolean;
   readonly materialize?: {
+    readonly mode: "dedicated";
     readonly region: string;
     readonly plan: Record<string, unknown>;
     readonly cutover: Record<string, unknown>;
@@ -104,6 +105,7 @@ export function parseLifecycleArgs(
       "accounts-url",
       "token",
       "idempotency-key",
+      "mode",
       "region",
       "compute",
       "database",
@@ -145,6 +147,10 @@ export function parseLifecycleArgs(
     json: Boolean(flags.json),
   };
   if (operation === "materialize") {
+    const mode = (flags.mode as string | undefined) ?? "dedicated";
+    if (mode !== "dedicated") {
+      throw new Error("--mode must be dedicated");
+    }
     const region = flags.region as string | undefined;
     if (!region) throw new Error("missing --region");
     if (flags["cost-ack"] !== true) {
@@ -157,6 +163,7 @@ export function parseLifecycleArgs(
     return {
       ...base,
       materialize: {
+        mode,
         region,
         plan: objectFromEntries({
           compute: flags.compute,
@@ -244,7 +251,7 @@ function buildLifecycleRequest(
     const materialize = options.materialize;
     if (!materialize) throw new Error("missing materialize options");
     return {
-      mode: "dedicated",
+      mode: materialize.mode,
       region: materialize.region,
       plan: materialize.plan,
       cutover: materialize.cutover,
@@ -295,11 +302,12 @@ function lifecycleHelpText(operation: LifecycleOperation): string {
     return `takosumi-git materialize
 
 USAGE:
-  takosumi-git materialize <installation-id> --region <region> --cost-ack [options]
+  takosumi-git materialize <installation-id> --mode dedicated --region <region> --cost-ack [options]
 
 OPTIONS:
   --accounts-url <url>       Takosumi Accounts URL (or TAKOSUMI_ACCOUNTS_URL)
   --token <token>            bearer token (or TAKOSUMI_ACCOUNTS_TOKEN/TAKOS_TOKEN)
+  --mode dedicated           target runtime mode (default dedicated)
   --region <region>          target dedicated runtime region
   --compute <plan>           compute plan hint
   --database <plan>          database plan hint

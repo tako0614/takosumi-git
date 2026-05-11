@@ -5,6 +5,8 @@ import { parseLifecycleArgs, runLifecycle } from "./lifecycle.ts";
 Deno.test("parseLifecycleArgs reads materialize options from env", () => {
   const parsed = parseLifecycleArgs("materialize", [
     "inst_1",
+    "--mode",
+    "dedicated",
     "--region",
     "tokyo",
     "--compute",
@@ -32,6 +34,7 @@ Deno.test("parseLifecycleArgs reads materialize options from env", () => {
   assertEquals(parsed.installationId, "inst_1");
   assertEquals(parsed.accountsUrl, "http://accounts.example");
   assertEquals(parsed.token, "secret");
+  assertEquals(parsed.materialize?.mode, "dedicated");
   assertEquals(parsed.materialize?.region, "tokyo");
   assertEquals(parsed.materialize?.plan, {
     compute: "small",
@@ -42,6 +45,29 @@ Deno.test("parseLifecycleArgs reads materialize options from env", () => {
     strategy: "blue-green",
     drainSeconds: 30,
   });
+});
+
+Deno.test("parseLifecycleArgs rejects unsupported materialize modes", () => {
+  assertEquals(
+    (() => {
+      try {
+        parseLifecycleArgs("materialize", [
+          "inst_1",
+          "--mode",
+          "shared-cell",
+          "--region",
+          "tokyo",
+          "--cost-ack",
+          "--accounts-url",
+          "http://accounts.example",
+        ]);
+        return "ok";
+      } catch (error) {
+        return (error as Error).message;
+      }
+    })(),
+    "--mode must be dedicated",
+  );
 });
 
 Deno.test("parseLifecycleArgs requires explicit materialize cost ack", () => {
@@ -74,6 +100,7 @@ Deno.test("runLifecycle posts a materialize operation", async () => {
     idempotencyKey: "idem-materialize",
     json: true,
     materialize: {
+      mode: "dedicated",
       region: "tokyo",
       plan: {
         compute: "small",

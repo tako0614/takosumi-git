@@ -310,6 +310,7 @@ import data restorer configured.
 ```bash
 takosumi-git materialize inst_01J... \
   --accounts-url http://127.0.0.1:8787 \
+  --mode dedicated \
   --region tokyo \
   --compute small \
   --database small \
