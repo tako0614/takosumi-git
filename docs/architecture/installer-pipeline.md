@@ -195,7 +195,9 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 
 - runtime secrets は **一切渡さない** (`OIDC_CLIENT_SECRET` / database password
   / object store key など)。
-- network egress は allowlist 制 (default は registry / cache mirror のみ)。
+- untrusted Git repo には operator 側の container / VM runner で network egress
+  allowlist を適用する。current default local executor は build process の env
+  を clear するが、OS-level network namespace は作らない。
 - 出力は artifact (image digest / static asset URI) **だけ** が installer
   に返る。stdout / stderr は build log に残るが secret 検知 scrubber を通る。
 - workflow が要求する extra secret は AppBinding 経由でなく `secrets:`
