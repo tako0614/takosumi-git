@@ -103,7 +103,11 @@ a Git source plus ledger target fields:
 The response kind is `takosumi-git.install-apply@v1`. The JSON response also
 includes `accounts.installationId`, returned `accounts.bindings[]`, and
 `accounts.runtimeBinding`. It also includes `accounts.oidcClient` when Accounts
-materialized an OIDC client during create.
+materialized an OIDC client during create. When the app declares a required
+`install-launch-token@v1` binding, `--runtime-base-url` is supplied, and the
+kernel deploy is marked ready, `install apply` issues an install-bootstrap
+launch token and returns `launch.url` for the app's
+`install.postInstallLaunchPath`.
 
 ## Apply
 

@@ -848,7 +848,11 @@ resources:
             outcome: { status: "succeeded" },
           }));
         }
-        if (url.endsWith("/v1/installations/inst_1/launch-token")) {
+        const request = new Request(input, init);
+        if (
+          url.endsWith("/v1/installations/inst_1/launch-token") &&
+          request.method === "GET"
+        ) {
           return Promise.resolve(Response.json({
             issuer: "https://accounts.example",
             audience: "example.hello",
@@ -859,6 +863,18 @@ resources:
               INSTALL_LAUNCH_AUDIENCE: "example.hello",
               INSTALL_LAUNCH_ISSUER: "https://accounts.example",
             },
+          }));
+        }
+        if (
+          url.endsWith("/v1/installations/inst_1/launch-token") &&
+          request.method === "POST"
+        ) {
+          return Promise.resolve(Response.json({
+            url: "http://localhost:8787/_takosumi/launch?token=launch-jws",
+            token: "launch-jws",
+            expiresAt: "2026-05-12T00:02:00.000Z",
+            jti: "lt_1",
+            audience: "example.hello",
           }));
         }
         if (url.includes("/status")) {
@@ -913,6 +929,10 @@ resources:
 
     assertEquals(result.deployment?.status, 200);
     assertEquals(result.statusTransition?.status, 200);
+    assertEquals(
+      result.launch?.url,
+      "http://localhost:8787/_takosumi/launch?token=launch-jws",
+    );
     assertEquals(result.accounts.installationId, "inst_1");
     assertEquals(
       result.accounts.bindings[0]?.config_ref,
@@ -926,7 +946,7 @@ resources:
       ),
       true,
     );
-    assertEquals(requests.length, 4);
+    assertEquals(requests.length, 5);
     const body = await requests[0].json();
     assertEquals("serviceImports" in body, false);
     assertEquals(
@@ -996,6 +1016,16 @@ resources:
     assertEquals(await requests[3].json(), {
       status: "ready",
       reason: "kernel deploy HTTP 200",
+    });
+    assertEquals(
+      requests[4].url,
+      "http://accounts.example/v1/installations/inst_1/launch-token",
+    );
+    assertEquals(requests[4].method, "POST");
+    assertEquals(await requests[4].json(), {
+      purpose: "install-bootstrap",
+      ttlSeconds: 120,
+      redirectUri: "http://localhost:8787/_takosumi/launch",
     });
   } finally {
     await Deno.remove(root, { recursive: true });

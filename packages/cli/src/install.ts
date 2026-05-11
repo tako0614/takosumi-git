@@ -2098,6 +2098,7 @@ export interface InstallApplyResult {
     readonly status: number;
     readonly body: unknown;
   };
+  readonly launch?: Record<string, unknown>;
 }
 
 export interface AccountsInstallResponseSummary {
@@ -2262,6 +2263,7 @@ export async function applyInstall(
   let statusTransition:
     | { readonly status: number; readonly body: unknown }
     | undefined;
+  let launch: Record<string, unknown> | undefined;
   if (deployEndpoint) {
     if (!deployEndpoint || !deployToken) {
       throw new Error("kernel deploy endpoint and token are required");
@@ -2323,6 +2325,22 @@ export async function applyInstall(
       reason: `kernel deploy HTTP ${deployment.status}`,
       fetch: options.fetch,
     });
+    if (
+      deployment.status < 400 &&
+      options.runtimeBaseUrl &&
+      appHasBindingType(app, "install-launch-token@v1")
+    ) {
+      launch = await issueInstallLaunchToken({
+        accountsUrl: options.accountsUrl,
+        token: options.token,
+        installationId,
+        redirectUri: absoluteUrl(
+          options.runtimeBaseUrl,
+          app.install.postInstallLaunchPath,
+        ),
+        fetch: options.fetch,
+      });
+    }
   }
   return {
     preview,
@@ -2334,6 +2352,7 @@ export async function applyInstall(
     },
     ...(deployment ? { deployment } : {}),
     ...(statusTransition ? { statusTransition } : {}),
+    ...(launch ? { launch } : {}),
   };
 }
 
@@ -2383,6 +2402,37 @@ async function fetchLaunchTokenConfig(input: {
       headers: {
         ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
       },
+    },
+  );
+  const body = await readResponseBody(response);
+  if (response.status >= 400) {
+    throw new InstallApplyError(response.status, body);
+  }
+  return isRecord(body) ? body : {};
+}
+
+async function issueInstallLaunchToken(input: {
+  readonly accountsUrl: string;
+  readonly token?: string;
+  readonly installationId: string;
+  readonly redirectUri: string;
+  readonly fetch?: typeof fetch;
+}): Promise<Record<string, unknown>> {
+  const response = await (input.fetch ?? fetch)(
+    `${normalizeBaseUrl(input.accountsUrl)}/v1/installations/${
+      encodeURIComponent(input.installationId)
+    }/launch-token`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
+      },
+      body: JSON.stringify({
+        purpose: "install-bootstrap",
+        ttlSeconds: 120,
+        redirectUri: input.redirectUri,
+      }),
     },
   );
   const body = await readResponseBody(response);
@@ -3111,11 +3161,15 @@ function renderApplyResult(result: InstallApplyResult): string {
   const runtimeBinding = renderRuntimeBindingSummary(
     result.accounts.runtimeBinding,
   );
+  const launchUrl = result.launch
+    ? stringProperty(result.launch, "url", "url")
+    : undefined;
   return [
     "takosumi-git install apply",
     `app: ${result.preview.app.name} (${result.preview.app.id})`,
     `installation: ${installationId}`,
     ...(runtimeBinding ? [`runtime: ${runtimeBinding}`] : []),
+    ...(launchUrl ? [`launch: ${launchUrl}`] : []),
     `accounts response: HTTP ${result.response.status}`,
     ...(result.deployment
       ? [`kernel response: HTTP ${result.deployment.status}`]
