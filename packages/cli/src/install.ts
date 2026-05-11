@@ -1631,6 +1631,9 @@ export interface ParsedInstallArgs {
   readonly mode?: InstallableAppRuntimeMode;
   readonly sourceCommit?: string;
   readonly runtimeBaseUrl?: string;
+  readonly confirmPreviewId?: string;
+  readonly confirmPermissionDigest?: `sha256:${string}`;
+  readonly costAck?: boolean;
   readonly endpoint?: string;
   readonly deployToken?: string;
 }
@@ -1684,14 +1687,17 @@ export function parseInstallArgs(
       "mode",
       "source-commit",
       "runtime-base-url",
+      "preview-id",
+      "permission-digest",
       "endpoint",
       "deploy-token",
     ],
-    boolean: ["json"],
+    boolean: ["json", "cost-ack"],
     default: {
       cwd: ".",
       app: DEFAULT_APP_PATH,
       json: false,
+      "cost-ack": false,
     },
   });
   const positional = (flags._ ?? []).map((value) => String(value));
@@ -1727,6 +1733,10 @@ export function parseInstallArgs(
     (flags["runtime-base-url"] as string | undefined) ??
       env.get("TAKOSUMI_RUNTIME_BASE_URL"),
   );
+  const confirmPreviewId = flags["preview-id"] as string | undefined;
+  const confirmPermissionDigest = flags["permission-digest"] as
+    | string
+    | undefined;
   const endpoint = (flags.endpoint as string | undefined) ??
     env.get("TAKOSUMI_ENDPOINT");
   const deployToken = endpoint
@@ -1735,6 +1745,15 @@ export function parseInstallArgs(
     : (flags["deploy-token"] as string | undefined);
   if (sourceCommit && !fullCommitPattern.test(sourceCommit)) {
     throw new Error("--source-commit must be a 40-char SHA");
+  }
+  if (confirmPreviewId && !/^preview_[0-9a-f]{24}$/.test(confirmPreviewId)) {
+    throw new Error("--preview-id must be preview_<24-hex>");
+  }
+  if (
+    confirmPermissionDigest &&
+    !/^sha256:[0-9a-f]{64}$/.test(confirmPermissionDigest)
+  ) {
+    throw new Error("--permission-digest must be sha256:<64-hex>");
   }
   if (sourceGitUrl) {
     validateInstallGitUrl(sourceGitUrl);
@@ -1791,6 +1810,13 @@ export function parseInstallArgs(
     ...(mode ? { mode } : {}),
     ...(sourceCommit ? { sourceCommit } : {}),
     ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
+    ...(confirmPreviewId ? { confirmPreviewId } : {}),
+    ...(confirmPermissionDigest
+      ? {
+        confirmPermissionDigest: confirmPermissionDigest as `sha256:${string}`,
+      }
+      : {}),
+    costAck: Boolean(flags["cost-ack"]),
     ...(endpoint ? { endpoint } : {}),
     ...(deployToken ? { deployToken } : {}),
   };
@@ -1902,6 +1928,10 @@ APPLY OPTIONS:
   --source-commit <sha> resolved 40-char source commit pin
   --runtime-base-url <url>
                         app runtime base URL for OIDC redirect materialization
+  --preview-id <id>     preview id being approved; must match recomputed preview
+  --permission-digest <sha256:...>
+                        permission digest being approved; must match recomputed preview
+  --cost-ack            acknowledge provider-specific metered binding cost
   --endpoint <url>      takosumi kernel endpoint for deploy (or TAKOSUMI_ENDPOINT)
   --deploy-token <tok>  kernel deploy token (or TAKOSUMI_DEPLOY_TOKEN/TAKOSUMI_TOKEN)
 `;
@@ -2169,6 +2199,44 @@ function oidcClientAuthMethodForAccounts(
   return undefined;
 }
 
+function installConfirmRequest(
+  preview: InstallPreview,
+  options: Pick<
+    ParsedInstallArgs,
+    "confirmPreviewId" | "confirmPermissionDigest" | "costAck"
+  >,
+): Record<string, unknown> {
+  if (
+    options.confirmPreviewId &&
+    options.confirmPreviewId !== preview.previewId
+  ) {
+    throw new Error(
+      `--preview-id (${options.confirmPreviewId}) does not match current preview (${preview.previewId})`,
+    );
+  }
+  if (
+    options.confirmPermissionDigest &&
+    options.confirmPermissionDigest !== preview.permissionDigest
+  ) {
+    throw new Error(
+      `--permission-digest (${options.confirmPermissionDigest}) does not match current preview (${preview.permissionDigest})`,
+    );
+  }
+  if (preview.cost.meteredBindingCount > 0 && options.costAck !== true) {
+    throw new Error(
+      "install apply requires --cost-ack when preview includes metered bindings",
+    );
+  }
+  return {
+    previewId: options.confirmPreviewId ?? preview.previewId,
+    permissionDigest: options.confirmPermissionDigest ??
+      preview.permissionDigest,
+    costAck: options.costAck === true,
+    approvalRequired: preview.approvalRequired,
+    expiresAt: preview.expiresAt,
+  };
+}
+
 export async function applyInstall(
   options: ParsedInstallArgs & {
     readonly subcommand: "apply";
@@ -2204,6 +2272,7 @@ export async function applyInstall(
       "source.commit is required for install apply; pin the ref before creating AppInstallation",
     );
   }
+  const confirm = installConfirmRequest(preview, options);
   const oidcClients = installOidcClientCreateRequests(
     app,
     options.runtimeBaseUrl,
@@ -2223,6 +2292,7 @@ export async function applyInstall(
     },
     mode,
     createdBySubject: options.createdBySubject,
+    confirm,
     ...(oidcClients.length > 0 ? { oidcClients } : {}),
     bindings: appBindingCreateRequests(app),
     grants: app.permissions.requested.map((capability) => ({

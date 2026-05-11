@@ -96,7 +96,10 @@ a Git source plus ledger target fields:
   "ref": "v1.2.3",
   "accountId": "acct_...",
   "spaceId": "space_...",
-  "subject": "tsub_..."
+  "subject": "tsub_...",
+  "previewId": "preview_...",
+  "permissionDigest": "sha256:...",
+  "costAck": true
 }
 ```
 
@@ -123,6 +126,9 @@ takosumi-git install \
   --source-commit 0123456789abcdef0123456789abcdef01234567 \
   --runtime-base-url https://app.example.com \
   --mode shared-cell \
+  --preview-id preview_... \
+  --permission-digest sha256:... \
+  --cost-ack \
   --endpoint "$TAKOSUMI_ENDPOINT" \
   --deploy-token "$TAKOSUMI_DEPLOY_TOKEN"
 ```
@@ -143,7 +149,8 @@ takosumi-git install https://github.com/example/hello \
   --accounts-url http://127.0.0.1:8787 \
   --account-id acct_... \
   --space-id space_... \
-  --subject tsub_...
+  --subject tsub_... \
+  --cost-ack
 ```
 
 `install apply` posts to Takosumi Accounts:
@@ -156,7 +163,12 @@ The request carries the AppInstallation source pin, `appManifestDigest`,
 `compiledManifestDigest` when `.takosumi/manifest.yml` is present, AppBinding
 records derived from `app.yml` binding declarations, namespace export grants
 resolved by Accounts / installer policy, and AppGrant records derived from
-`permissions.requested`. When `--runtime-base-url` (or
+`permissions.requested`. It also carries `confirm.previewId`,
+`confirm.permissionDigest`, and `confirm.costAck` approval evidence. If the
+preview includes metered provider bindings, `--cost-ack` is required before
+takosumi-git calls Accounts. If `--preview-id` or `--permission-digest` is
+provided, takosumi-git recomputes the preview and rejects stale approval
+evidence before the Accounts request. When `--runtime-base-url` (or
 `TAKOSUMI_RUNTIME_BASE_URL`) is supplied, `identity.oidc@v1` redirect paths are
 materialized into absolute redirect URIs and sent as an `oidcClients[]` request
 so Takosumi Accounts can create the per-installation OIDC client in the same

@@ -410,6 +410,15 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
       installBody.source.commit,
       "0123456789abcdef0123456789abcdef01234567",
     );
+    assertEquals(installBody.confirm.costAck, false);
+    assertEquals(
+      String(installBody.confirm.previewId).startsWith("preview_"),
+      true,
+    );
+    assertEquals(
+      String(installBody.confirm.permissionDigest).startsWith("sha256:"),
+      true,
+    );
     assertEquals(
       requests[1].url,
       "http://accounts.example/v1/installations/inst_1/launch-token",

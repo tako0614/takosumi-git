@@ -524,6 +524,11 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
     "dedicated",
     "--source-commit",
     "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    "--preview-id",
+    "preview_0123456789abcdef01234567",
+    "--permission-digest",
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "--cost-ack",
   ], {
     get(key: string) {
       const env: Record<string, string> = {
@@ -549,6 +554,12 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.mode, "dedicated");
   assertEquals(parsed.sourceCommit, "abcdefabcdefabcdefabcdefabcdefabcdefabcd");
   assertEquals(parsed.runtimeBaseUrl, "https://hello.example");
+  assertEquals(parsed.confirmPreviewId, "preview_0123456789abcdef01234567");
+  assertEquals(
+    parsed.confirmPermissionDigest,
+    "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  );
+  assertEquals(parsed.costAck, true);
   assertEquals(parsed.endpoint, "https://kernel.example");
   assertEquals(parsed.deployToken, "deploy-secret");
 });
@@ -742,6 +753,7 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       fetch: (input, init) => {
         requests.push(new Request(input, init));
         return Promise.resolve(Response.json({
@@ -792,6 +804,82 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
     assertEquals("serviceImports" in body, false);
     assertEquals(body.oidcClients, undefined);
     assertEquals(body.grants.length, 2);
+    assertEquals(body.confirm, {
+      previewId: result.preview.previewId,
+      permissionDigest: result.preview.permissionDigest,
+      costAck: true,
+      approvalRequired: result.preview.approvalRequired,
+      expiresAt: result.preview.expiresAt,
+    });
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall requires cost acknowledgement for metered bindings", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: root,
+          appPath: join(root, ".takosumi", "app.yml"),
+          json: true,
+          accountsUrl: "http://accounts.example/",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+        }),
+      Error,
+      "--cost-ack",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall rejects stale approval evidence", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      MANIFEST_YML,
+    );
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: root,
+          appPath: join(root, ".takosumi", "app.yml"),
+          json: true,
+          accountsUrl: "http://accounts.example/",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+          confirmPermissionDigest:
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+          costAck: true,
+        }),
+      Error,
+      "--permission-digest",
+    );
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -836,6 +924,7 @@ resources:
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       runtimeBaseUrl: "http://localhost:8787",
       endpoint: "http://kernel.example/",
       deployToken: "deploy-secret",
@@ -1085,6 +1174,7 @@ resources:
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       runtimeBaseUrl: "http://localhost:8787",
       endpoint: "http://kernel.example/",
       deployToken: "deploy-secret",
@@ -1295,6 +1385,7 @@ resources:
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       runtimeBaseUrl: "https://hello.example.com",
       endpoint: "http://kernel.example/",
       deployToken: "deploy-secret",
@@ -1405,6 +1496,7 @@ Deno.test("applyInstall compiles workflowRef before kernel deploy", async () => 
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       endpoint: "http://kernel.example",
       deployToken: "deploy-secret",
       checkoutSource: () =>
@@ -1523,6 +1615,7 @@ Deno.test("applyInstall default workflow executor does not inherit runtime secre
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       endpoint: "http://kernel.example",
       deployToken: "deploy-secret",
       checkoutSource: () =>
@@ -1599,6 +1692,7 @@ Deno.test("applyInstall rejects non-digest-pinned deploy images", async () => {
           accountId: "acct_1",
           spaceId: "space_1",
           createdBySubject: "tsub_owner",
+          costAck: true,
           endpoint: "http://kernel.example",
           deployToken: "deploy-secret",
           fetch: (input, init) => {
@@ -1640,6 +1734,7 @@ Deno.test("applyInstall rejects missing required provider binding materializatio
           accountId: "acct_1",
           spaceId: "space_1",
           createdBySubject: "tsub_owner",
+          costAck: true,
           runtimeBaseUrl: "http://localhost:8787",
           endpoint: "http://kernel.example/",
           deployToken: "deploy-secret",
@@ -1711,6 +1806,7 @@ Deno.test("applyInstall rejects missing required launch token config", async () 
           accountId: "acct_1",
           spaceId: "space_1",
           createdBySubject: "tsub_owner",
+          costAck: true,
           runtimeBaseUrl: "http://localhost:8787",
           endpoint: "http://kernel.example/",
           deployToken: "deploy-secret",
@@ -1845,6 +1941,7 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
       "space_1",
       "--subject",
       "tsub_owner",
+      "--cost-ack",
       "--endpoint",
       "http://kernel.example",
       "--deploy-token",
@@ -1888,6 +1985,7 @@ Deno.test("applyInstall requires a pinned source commit", async () => {
           accountId: "acct_1",
           spaceId: "space_1",
           createdBySubject: "tsub_owner",
+          costAck: true,
         }),
       Error,
       "source.commit is required",
@@ -1913,6 +2011,7 @@ Deno.test("applyInstall accepts resolver-provided source commit", async () => {
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       sourceCommit: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
       fetch: (input, init) => {
         requests.push(new Request(input, init));
@@ -1957,6 +2056,7 @@ Deno.test("applyInstall uses Git URL checkout commit as source pin", async () =>
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
+      costAck: true,
       checkoutSource: () =>
         Promise.resolve({
           root: checkoutRoot,
@@ -2001,6 +2101,7 @@ Deno.test("applyInstall surfaces Accounts errors", async () => {
           accountId: "acct_1",
           spaceId: "space_1",
           createdBySubject: "tsub_owner",
+          costAck: true,
           fetch: () =>
             Promise.resolve(Response.json({ error: "nope" }, { status: 409 })),
         }),

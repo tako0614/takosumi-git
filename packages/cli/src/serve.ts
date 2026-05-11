@@ -489,6 +489,17 @@ async function handleInstallApplyRequest(
       optionalBodyString(body, "runtimeBaseUrl", "runtime_base_url") ??
         options.runtimeBaseUrl,
     );
+    const confirmPreviewId = optionalBodyString(
+      body,
+      "previewId",
+      "preview_id",
+    );
+    const confirmPermissionDigest = optionalBodyString(
+      body,
+      "permissionDigest",
+      "permission_digest",
+    );
+    const costAck = optionalBodyBoolean(body, "costAck", "cost_ack");
 
     const result = await applyInstall({
       subcommand: "apply",
@@ -512,6 +523,14 @@ async function handleInstallApplyRequest(
       ...(mode ? { mode } : {}),
       ...(sourceCommit ? { sourceCommit } : {}),
       ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
+      ...(confirmPreviewId ? { confirmPreviewId } : {}),
+      ...(confirmPermissionDigest
+        ? {
+          confirmPermissionDigest:
+            confirmPermissionDigest as `sha256:${string}`,
+        }
+        : {}),
+      ...(costAck !== undefined ? { costAck } : {}),
       endpoint: options.endpoint,
       deployToken: options.deployToken ?? options.token,
       ...(options.installPreviewCheckoutSource
@@ -554,6 +573,15 @@ function optionalBodyString(
 ): string | undefined {
   const value = body[key] ?? (alternateKey ? body[alternateKey] : undefined);
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function optionalBodyBoolean(
+  body: Record<string, unknown>,
+  key: string,
+  alternateKey?: string,
+): boolean | undefined {
+  const value = body[key] ?? (alternateKey ? body[alternateKey] : undefined);
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function hasBearerToken(request: Request, token: string): boolean {
