@@ -26,6 +26,7 @@ export interface ParsedImportArgs {
 export interface ImportApplyResult {
   readonly bundlePath: string;
   readonly request: Record<string, unknown>;
+  readonly ignoredDataEntries?: readonly string[];
   readonly accounts: ImportAccountsResponseSummary;
   readonly importPlan?: Record<string, unknown>;
   readonly response: {
@@ -131,10 +132,11 @@ export async function applyImport(
     readonly ageExecutable?: string;
   },
 ): Promise<ImportApplyResult> {
-  const bundle = await readExportBundleJson(options.bundlePath, {
+  const exportInput = await readExportBundleInput(options.bundlePath, {
     identities: options.identities ?? [],
     ageExecutable: options.ageExecutable,
   });
+  const bundle = exportInput.bundle;
   const request = {
     bundle,
     targetAccountId: options.accountId,
@@ -170,6 +172,9 @@ export async function applyImport(
   return {
     bundlePath: options.bundlePath,
     request,
+    ...(exportInput.dataEntries.length > 0
+      ? { ignoredDataEntries: exportInput.dataEntries }
+      : {}),
     accounts: readImportAccountsResponse(body),
     ...(readImportPlan(body) ? { importPlan: readImportPlan(body) } : {}),
     response: {
@@ -270,31 +275,45 @@ function parseIdentityPaths(value: unknown): readonly string[] {
   ) => resolve(entry));
 }
 
-async function readExportBundleJson(
+interface ReadExportBundleInputResult {
+  readonly bundle: Record<string, unknown>;
+  readonly dataEntries: readonly string[];
+}
+
+async function readExportBundleInput(
   path: string,
   options: {
     readonly identities?: readonly string[];
     readonly ageExecutable?: string;
   } = {},
-): Promise<Record<string, unknown>> {
+): Promise<ReadExportBundleInputResult> {
   if (path.endsWith(".age")) {
-    return parseExportBundleJsonText(
-      await readAgeEncryptedTarZstBundleJson(path, options),
-    );
+    const result = await readAgeEncryptedTarZstBundle(path, options);
+    return {
+      bundle: parseExportBundleJsonText(result.bundleJson),
+      dataEntries: result.dataEntries,
+    };
   }
   if (path.endsWith(".tar.zst")) {
-    return parseExportBundleJsonText(await readTarZstBundleJson(path));
+    const result = await readTarZstBundle(path);
+    return {
+      bundle: parseExportBundleJsonText(result.bundleJson),
+      dataEntries: result.dataEntries,
+    };
   }
-  return parseExportBundleJsonText(await Deno.readTextFile(path));
+  return {
+    bundle: parseExportBundleJsonText(await Deno.readTextFile(path)),
+    dataEntries: [],
+  };
 }
 
-async function readAgeEncryptedTarZstBundleJson(
+async function readAgeEncryptedTarZstBundle(
   path: string,
   options: {
     readonly identities?: readonly string[];
     readonly ageExecutable?: string;
   },
-): Promise<string> {
+): Promise<{ bundleJson: string; dataEntries: readonly string[] }> {
   const identities = options.identities ?? [];
   if (identities.length === 0) {
     throw new Error("encrypted export bundle import requires --identity");
@@ -319,10 +338,19 @@ async function readAgeEncryptedTarZstBundleJson(
         `failed to decrypt export bundle${stderr ? `: ${stderr}` : ""}`,
       );
     }
-    return await readTarZstBundleJson(clearPath);
+    return await readTarZstBundle(clearPath);
   } finally {
     await Deno.remove(clearPath).catch(() => {});
   }
+}
+
+async function readTarZstBundle(
+  path: string,
+): Promise<{ bundleJson: string; dataEntries: readonly string[] }> {
+  return {
+    bundleJson: await readTarZstBundleJson(path),
+    dataEntries: await readTarZstDataEntries(path),
+  };
 }
 
 async function readTarZstBundleJson(path: string): Promise<string> {
@@ -344,6 +372,30 @@ async function readTarZstBundleJson(path: string): Promise<string> {
   throw new Error(
     `failed to read export bundle JSON from tar.zst: ${errors.join("; ")}`,
   );
+}
+
+async function readTarZstDataEntries(path: string): Promise<readonly string[]> {
+  const output = await new Deno.Command("tar", {
+    args: [
+      "--use-compress-program=zstd",
+      "-tf",
+      path,
+    ],
+  }).output();
+  if (!output.success) {
+    const stderr = new TextDecoder().decode(output.stderr).trim();
+    throw new Error(
+      `failed to list export bundle archive${stderr ? `: ${stderr}` : ""}`,
+    );
+  }
+  const entries = new TextDecoder().decode(output.stdout).split(/\r?\n/)
+    .map((entry) => entry.replace(/^\.\//, "").trim())
+    .filter(Boolean);
+  return entries.filter((entry) =>
+    entry.startsWith("takos-export/data/") &&
+    !entry.endsWith("/") &&
+    entry !== "takos-export/data/README.md"
+  ).sort((a, b) => a.localeCompare(b));
 }
 
 function parseExportBundleJsonText(text: string): Record<string, unknown> {
@@ -388,6 +440,11 @@ function renderImportResult(result: ImportApplyResult): string {
     `installation: ${result.accounts.installationId ?? "(unknown)"}`,
     ...(sourceIssuer ? [`source issuer: ${sourceIssuer}`] : []),
     ...(targetIssuer ? [`target issuer: ${targetIssuer}`] : []),
+    ...(result.ignoredDataEntries?.length
+      ? [
+        `data restore: skipped (${result.ignoredDataEntries.length} archive data entries ignored by current import API)`,
+      ]
+      : []),
     `accounts response: HTTP ${result.response.status}`,
     "",
   ].join("\n");

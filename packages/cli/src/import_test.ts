@@ -251,6 +251,84 @@ Deno.test("applyImport reads bundle JSON from tar.zst archive", async () => {
   }
 });
 
+Deno.test("applyImport reports data entries that current import API ignores", async () => {
+  const root = await Deno.makeTempDir({
+    prefix: "takosumi-git-import-data-",
+  });
+  try {
+    const sourceRoot = join(root, "src");
+    await Deno.mkdir(join(sourceRoot, "takos-export", "data", "postgres"), {
+      recursive: true,
+    });
+    await Deno.writeTextFile(
+      join(sourceRoot, "takos-export", "bundle.json"),
+      `${JSON.stringify(EXPORT_BUNDLE, null, 2)}\n`,
+    );
+    await Deno.writeTextFile(
+      join(sourceRoot, "takos-export", "data", "manifest.json"),
+      `${
+        JSON.stringify(
+          {
+            kind: "takosumi.accounts.installation-export-data-manifest@v1",
+            version: "v1",
+            files: [{
+              path: "takos-export/data/postgres/dump.sql",
+              mediaType: "application/sql",
+              byteLength: 10,
+            }],
+          },
+          null,
+          2,
+        )
+      }\n`,
+    );
+    await Deno.writeTextFile(
+      join(sourceRoot, "takos-export", "data", "postgres", "dump.sql"),
+      "select 1;\n",
+    );
+    const bundlePath = join(root, "takos-export.tar.zst");
+    await assertCommandOk(
+      new Deno.Command("tar", {
+        args: [
+          "--use-compress-program=zstd",
+          "-cf",
+          bundlePath,
+          "-C",
+          sourceRoot,
+          "takos-export",
+        ],
+      }),
+    );
+
+    const result = await applyImport({
+      bundlePath,
+      accountsUrl: "https://accounts.target.test/",
+      accountId: "acct_target",
+      spaceId: "space_target",
+      createdBySubject: "tsub_target",
+      json: true,
+      fetch: () =>
+        Promise.resolve(Response.json({
+          installation: {
+            id: "inst_target",
+          },
+        }, { status: 202 })),
+    });
+
+    assertEquals(result.accounts.installationId, "inst_target");
+    assertEquals(result.ignoredDataEntries, [
+      "takos-export/data/manifest.json",
+      "takos-export/data/postgres/dump.sql",
+    ]);
+    assertEquals(
+      (result.request.bundle as { kind: string }).kind,
+      "takosumi.accounts.installation-export-bundle@v1",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("applyImport decrypts age-wrapped tar.zst archive with identity", async () => {
   const root = await Deno.makeTempDir({
     prefix: "takosumi-git-import-age-",
