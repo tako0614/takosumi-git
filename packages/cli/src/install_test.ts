@@ -1143,6 +1143,158 @@ resources:
   }
 });
 
+Deno.test("applyInstall resolves domain and deploy-intent binding placeholders", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      `apiVersion: app.takosumi.dev/v1
+kind: InstallableApp
+metadata:
+  id: example.gitops
+  name: GitOps App
+  description: App using domain and deploy-intent bindings
+  publisher: example
+  homepage: https://example.com
+source:
+  git: https://github.com/example/gitops
+  ref: v1.2.3
+  commit: 0123456789abcdef0123456789abcdef01234567
+entry:
+  manifest: .takosumi/manifest.yml
+runtime:
+  modes:
+    - dedicated
+bindings:
+  site:
+    type: domain.http@v1
+    required: true
+    hostname:
+      custom: hello.example.com
+  deploy:
+    type: deploy-intent.gitops@v1
+    required: true
+    branch: main
+    writePathPrefix: apps/hello
+install:
+  healthcheckPath: /health
+  postInstallLaunchPath: /_takosumi/launch
+permissions:
+  requested: []
+`,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      `apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: hello
+resources:
+  - shape: web-service@v1
+    name: api
+    provider: "@takos/selfhost-docker-compose"
+    spec:
+      image: ghcr.io/example/hello@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      port: 8080
+      env:
+        PUBLIC_HOST: \${bindings.site.hostname}
+        PUBLIC_URL: \${bindings.site.url}
+        DEPLOY_DRIVER: \${bindings.deploy.driver}
+        DEPLOY_REMOTE: \${bindings.deploy.remote}
+        DEPLOY_BRANCH: \${bindings.deploy.branch}
+        DEPLOY_PREFIX: \${bindings.deploy.writePathPrefix}
+        DEPLOY_TOKEN: \${secrets.deploy.token}
+        DOMAIN_CONFIG_REF: \${refs.site.configRef}
+        DEPLOY_CONFIG_REF: \${refs.deploy.configRef}
+        DEPLOY_SECRET_REF: \${refs.deploy.secretRefs[0]}
+`,
+    );
+
+    await applyInstall({
+      subcommand: "apply",
+      cwd: root,
+      appPath: join(root, ".takosumi", "app.yml"),
+      json: true,
+      accountsUrl: "http://accounts.example/",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      runtimeBaseUrl: "https://hello.example.com",
+      endpoint: "http://kernel.example/",
+      deployToken: "deploy-secret",
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Promise.resolve(Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          }));
+        }
+        if (url.includes("/status")) {
+          return Promise.resolve(Response.json({
+            installation: { id: "inst_gitops", status: "ready" },
+          }));
+        }
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_gitops" },
+          binding_env: {
+            DEPLOY_INTENT_DRIVER: "gitops",
+            DEPLOY_INTENT_REMOTE: "ssh://git.example.com/acme/platform.git",
+            DEPLOY_INTENT_TOKEN: "deploy-token",
+          },
+          bindings: [{
+            name: "site",
+            kind: "domain.http@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_gitops/bindings/site/domain/hello-example",
+            secret_refs: [],
+          }, {
+            name: "deploy",
+            kind: "deploy-intent.gitops@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_gitops/bindings/deploy/gitops/main",
+            secret_refs: [
+              "takosumi-accounts://installations/inst_gitops/bindings/deploy/secrets/token",
+            ],
+            branch: "main",
+            write_path_prefix: "apps/hello",
+          }],
+        }, { status: 202 }));
+      },
+    });
+
+    const deployBody = await requests[1].json();
+    const env = deployBody.manifest.resources[0].spec.env;
+    assertEquals(env.PUBLIC_HOST, "hello.example.com");
+    assertEquals(env.PUBLIC_URL, "https://hello.example.com");
+    assertEquals(env.DEPLOY_DRIVER, "gitops");
+    assertEquals(env.DEPLOY_REMOTE, "ssh://git.example.com/acme/platform.git");
+    assertEquals(env.DEPLOY_BRANCH, "main");
+    assertEquals(env.DEPLOY_PREFIX, "apps/hello");
+    assertEquals(env.DEPLOY_TOKEN, "deploy-token");
+    assertEquals(
+      env.DOMAIN_CONFIG_REF,
+      "takosumi-accounts://installations/inst_gitops/bindings/site/domain/hello-example",
+    );
+    assertEquals(
+      env.DEPLOY_CONFIG_REF,
+      "takosumi-accounts://installations/inst_gitops/bindings/deploy/gitops/main",
+    );
+    assertEquals(
+      env.DEPLOY_SECRET_REF,
+      "takosumi-accounts://installations/inst_gitops/bindings/deploy/secrets/token",
+    );
+    assertEquals(JSON.stringify(deployBody).includes("${bindings."), false);
+    assertEquals(JSON.stringify(deployBody).includes("${secrets."), false);
+    assertEquals(JSON.stringify(deployBody).includes("${refs."), false);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("applyInstall compiles workflowRef before kernel deploy", async () => {
   const checkoutRoot = await Deno.makeTempDir({
     prefix: "takosumi-git-install-workflow-",
