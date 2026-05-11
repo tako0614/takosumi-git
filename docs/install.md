@@ -14,7 +14,7 @@ the kernel manifest:
 
 ```text
 .takosumi/app.yml       # InstallableApp v1, read by takosumi-git
-.takosumi/manifest.yml  # kernel-bound manifest, posted only after compilation
+.takosumi/manifest.yml  # authoring compute manifest, compiled before kernel deploy
 ```
 
 `app.yml` must use:
@@ -45,14 +45,15 @@ takosumi-git install preview https://github.com/example/hello --ref v1.2.3 --jso
 
 The preview response is `takosumi-git.install-preview@v1` and includes:
 
+- `previewId` and `expiresAt` for the approval record
 - app identity, publisher, homepage
 - source git URL, ref, optional commit, and manifest digests
 - runtime modes
 - requested binding kinds
-- requested service imports with service identifier, alias, endpoint roles, and
-  refresh policy
 - requested AppGrant capabilities
 - permission digest
+- risk reasons and `approvalRequired`
+- cost metadata
 - compatibility warnings
 
 The AppGrant catalog includes generic installer capabilities such as
@@ -149,8 +150,8 @@ POST /v1/installations
 
 The request carries the AppInstallation source pin, `appManifestDigest`,
 `compiledManifestDigest` when `.takosumi/manifest.yml` is present, AppBinding
-records derived from `app.yml` binding declarations, service import requests
-derived from `app.yml` `serviceImports[]`, and AppGrant records derived from
+records derived from `app.yml` binding declarations, namespace export grants
+resolved by Accounts / installer policy, and AppGrant records derived from
 `permissions.requested`. When `--runtime-base-url` (or
 `TAKOSUMI_RUNTIME_BASE_URL`) is supplied, `identity.oidc@v1` redirect paths are
 materialized into absolute redirect URIs and sent as an `oidcClients[]` request
@@ -165,11 +166,10 @@ POST /v1/deployments
 ```
 
 The kernel deploy step requires `--deploy-token` (or `TAKOSUMI_DEPLOY_TOKEN` /
-`TAKOSUMI_TOKEN`). If the manifest contains `imports[]` and does not already
-include `serviceResolvers[]`, apply also requires `--service-resolver-url` and
-`--service-resolver-public-key` so service descriptors can be resolved and
-pinned by the kernel. A kernel HTTP 4xx/5xx response makes the CLI exit
-non-zero.
+`TAKOSUMI_TOKEN`). The compiled manifest must already be a closed Shape
+manifest; `services[]`, `imports[]`, `serviceResolvers[]`, and `${imports.*}`
+are rejected before the kernel request. A kernel HTTP 4xx/5xx response makes the
+CLI exit non-zero.
 
 After the kernel response, `install apply` updates the AppInstallation ledger:
 
@@ -199,12 +199,13 @@ original approval evidence.
 
 When `install apply` also deploys to a kernel endpoint, takosumi-git uses the
 Accounts create response (`binding_env`, OIDC client material, and
-`GET /v1/installations/{id}/launch-token` public config) to inject missing
-default runtime environment values into compute resources before
-`POST /v1/deployments`. Explicit `env:` keys in the manifest win; only missing
-keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`,
-`DATABASE_URL`, `BLOB_*`, `DEPLOY_INTENT_*`, `TAKOS_INSTALLATION_ID`, and
-`INSTALL_LAUNCH_*` are filled.
+`GET /v1/installations/{id}/launch-token` public config) to resolve explicit
+`${bindings.*}`, `${secrets.*}`, and `${installation.*}` placeholders, then
+inject missing default runtime environment values into compute resources before
+`POST /v1/deployments`. Explicit `env:` keys in the manifest win after their
+supported placeholders are resolved; only missing keys such as `OIDC_CLIENT_ID`,
+`OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `DATABASE_URL`, `BLOB_*`,
+`DEPLOY_INTENT_*`, `TAKOS_INSTALLATION_ID`, and `INSTALL_LAUNCH_*` are filled.
 
 If a required provider-backed binding (`database.postgres@v1`,
 `object-store.s3-compatible@v1`, `domain.http@v1`, or `deploy-intent.gitops@v1`)
@@ -215,36 +216,18 @@ with default env, the required `binding_env` keys must also be present. Required
 launch-token ref plus all `INSTALL_LAUNCH_*` values from the public config
 endpoint before deploy.
 
-## Service Imports
+## Namespace Exports
 
-`serviceImports[]` is installer-facing metadata for external Takosumi services
-such as `takosumi.account.auth@v1`. It is separate from AppBinding declarations:
-the Binding Catalog remains the six installer-bound resource bindings, while
-service imports are compiled into manifest-level `imports[]` and persisted on
-the AppInstallation ledger as approved external service requests. Preview
-surfaces the binding name, alias, service identifier, requested endpoint roles,
-and refresh policy so approval is explicit.
+Operator-owned dependencies are not service imports. OIDC, billing, dashboard,
+and Accounts lifecycle API access are resolved through namespace exports such as
+`operator.identity.oidc`, `operator.billing.default`, `operator.dashboard.web`,
+and `operator.platform.deploy`. takosumi-git may ask Takosumi Accounts to
+materialize the resulting OIDC client, launch token, grant, or billing/reporting
+contract, but it must not write manifest-level `imports[]` or
+`serviceResolvers[]`.
 
-When a kernel manifest is present, takosumi-git compiles the app metadata into
-the manifest by merging `serviceImports[]` entries into top-level `imports[]`.
-Existing manifest imports with the same alias must match the `app.yml`
-declaration exactly. Conflicts fail before any Accounts or kernel request is
-made.
-
-`takosumi-git install apply`, `takosumi-git push`, and webhook dispatches from
-`takosumi-git serve` also read `.takosumi/app.yml` when it exists. If service
-imports are present and the manifest does not already declare
-`serviceResolvers[]`, the operator must inject an anchor resolver:
-
-```bash
-takosumi-git push \
-  --service-resolver-url https://anchor.example.test/v1/services \
-  --service-resolver-public-key "$TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY"
-```
-
-The same values can be supplied through `TAKOSUMI_SERVICE_RESOLVER_URL` and
-`TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY`. The kernel receives only the compiled
-manifest; `.takosumi/app.yml` itself remains installer metadata.
+The kernel receives only the compiled Shape manifest; `.takosumi/app.yml` itself
+remains installer metadata.
 
 When `install apply` also deploys to a kernel endpoint, it resolves
 `resources[i].workflowRef` through the same v1 `TAKOSUMI_ARTIFACT=<uri>` stdout
@@ -260,14 +243,16 @@ documented in [Artifact URI Contract](./artifact-contract.md).
 
 ## Installer Placeholders
 
-Compiled manifests must not carry installer-only placeholders. If
+Compiled manifests must not carry installer-only placeholders.
+`takosumi-git install apply` resolves Accounts-backed `${bindings.*}`,
+`${secrets.*}`, and `${installation.*}` values after the Takosumi Accounts
+install API creates the AppInstallation record and before kernel deploy. If
 `.takosumi/manifest.yml` still contains `${params.*}`, `${installation.*}`,
-`${artifacts.*}`, `${bindings.*}`, `${secrets.*}`, or legacy `${refs.*}`
-references after service-import compilation, `takosumi-git install apply` and
-`takosumi-git push` fail before any Accounts or kernel request. Kernel-bound
-service import placeholders such as
-`${imports.account-auth.endpoints.oidc-issuer.url}` are allowed to remain
-because the kernel public deploy route resolves them through `serviceResolvers`.
+`${artifacts.*}`, `${bindings.*}`, `${secrets.*}`, legacy `${refs.*}`, or
+removed `${imports.*}` references after the deploy request build,
+`takosumi-git install apply` fails before `POST /v1/deployments`.
+`takosumi-git push` has no Accounts materialization phase, so it fails before
+deploy when those installer-only placeholders are present.
 
 ## Commit Pins
 
@@ -338,6 +323,10 @@ takosumi-git import ./takos-export.tar.zst \
   --subject tsub_owner \
   --auth-issuer https://accounts.self-host.example
 ```
+
+`--auth-issuer` は import 先 Takosumi Accounts issuer を指します。Keycloak /
+Authentik / Auth0 などの upstream IdP URL を直接 app issuer として渡す option
+では ありません。
 
 The CLI posts:
 

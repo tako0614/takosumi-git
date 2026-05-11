@@ -102,7 +102,6 @@ export interface InstallableApp {
     readonly modes: readonly InstallableAppRuntimeMode[];
   };
   readonly bindings: Readonly<Record<string, InstallableAppBinding>>;
-  readonly serviceImports: readonly InstallableAppServiceImport[];
   readonly install: {
     readonly healthcheckPath: string;
     readonly postInstallLaunchPath: string;
@@ -148,16 +147,10 @@ export interface InstallableAppBinding {
   readonly maxLifetimeSeconds?: number;
 }
 
-export interface InstallableAppServiceImport {
-  readonly binding: string;
-  readonly alias: string;
-  readonly service: string;
-  readonly endpointRoles: readonly string[];
-  readonly refreshPolicy?: Record<string, unknown>;
-}
-
 export interface InstallPreview {
   readonly kind: "takosumi-git.install-preview@v1";
+  readonly previewId: `preview_${string}`;
+  readonly expiresAt: string;
   readonly app: {
     readonly id: string;
     readonly name: string;
@@ -187,7 +180,6 @@ export interface InstallPreview {
     readonly required: boolean;
     readonly redirectPaths?: readonly string[];
   }[];
-  readonly serviceImports: readonly InstallServiceImportPreview[];
   readonly permissions: {
     readonly requested: readonly InstallableAppPermission[];
   };
@@ -197,23 +189,20 @@ export interface InstallPreview {
     readonly meteredBindingCount: number;
     readonly note: string;
   };
+  readonly risk: {
+    readonly level: "low" | "medium" | "high";
+    readonly reasons: readonly string[];
+  };
+  readonly approvalRequired: boolean;
   readonly compatibility: {
     readonly requirements: Record<string, string>;
     readonly warnings: readonly string[];
   };
 }
 
-export interface InstallServiceImportPreview {
-  readonly binding: string;
-  readonly alias: string;
-  readonly service: string;
-  readonly endpointRoles: readonly string[];
-  readonly refreshPolicy?: Record<string, unknown>;
-}
-
 export interface InstallOidcClientCreateRequest {
   readonly binding: string;
-  readonly serviceId: string;
+  readonly namespacePath: string;
   readonly redirectUris: readonly string[];
   readonly allowedScopes: readonly string[];
   readonly subjectMode: "pairwise";
@@ -223,16 +212,9 @@ export interface InstallOidcClientCreateRequest {
     | "none";
 }
 
-export interface KernelManifestServiceImport {
-  readonly alias: string;
-  readonly service: string;
-  readonly refreshPolicy?: Record<string, unknown>;
-}
-
 export interface CompiledInstallManifest {
   readonly manifest: Record<string, unknown>;
   readonly digest: `sha256:${string}`;
-  readonly serviceImports: readonly KernelManifestServiceImport[];
 }
 
 interface InstallWorkflowResourceEntry {
@@ -264,14 +246,12 @@ const DEFAULT_APP_PATH = ".takosumi/app.yml";
 const reverseDomainPattern = /^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*)+$/;
 const publisherPattern = /^[a-z0-9]([a-z0-9-]{0,78}[a-z0-9])?$/;
 const bindingNamePattern = /^[a-z]([a-z0-9-]{0,30}[a-z0-9])?$/;
-const serviceIdentifierPattern =
-  /^[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*\.[a-z][a-z0-9-]*@v\d+(?:-[a-z][a-z0-9-]*)?$/;
-const endpointRolePattern = /^[a-z][a-z0-9-]*$/;
-const ttlDurationPattern = /^\d+[smhd]$/;
 const pathPattern = /^\/[^?#]{0,199}$/;
 const fullCommitPattern = /^[0-9a-f]{40}$/;
 const installerPlaceholderPattern =
-  /\$\{(?:params|installation|artifacts|bindings|secrets|refs)\.[^}]+}/;
+  /\$\{(?:params|installation|artifacts|bindings|secrets|refs|imports)\.[^}]+}/;
+const installerPlaceholderGlobalPattern =
+  /\$\{(params|installation|artifacts|bindings|secrets|refs|imports)\.([^}]+)}/g;
 const installArtifactMarkerPrefix = "TAKOSUMI_ARTIFACT=";
 const digestPinnedImagePattern = /^.+@sha256:[0-9a-f]{64}$/;
 const workflowEnvAllowlist = [
@@ -594,121 +574,6 @@ function parseBindings(
   return bindings;
 }
 
-function parseServiceImports(
-  record: Record<string, unknown>,
-  issues: InstallableAppValidationIssue[],
-): readonly InstallableAppServiceImport[] {
-  const raw = record.serviceImports;
-  if (raw === undefined) return [];
-  if (!Array.isArray(raw)) {
-    issues.push({ path: "serviceImports", message: "must be an array" });
-    return [];
-  }
-  if (raw.length > 32) {
-    issues.push({
-      path: "serviceImports",
-      message: "must contain 0-32 entries",
-    });
-  }
-  const imports: InstallableAppServiceImport[] = [];
-  const seenAliases = new Set<string>();
-  for (const [index, entry] of raw.entries()) {
-    const path = `serviceImports[${index}]`;
-    if (!isRecord(entry)) {
-      issues.push({ path, message: "must be an object" });
-      continue;
-    }
-    unknownKeys(
-      entry,
-      path,
-      ["binding", "alias", "service", "endpointRoles", "refreshPolicy"],
-      issues,
-    );
-    const binding = serviceImportStringField(
-      entry,
-      "binding",
-      `${path}.binding`,
-      issues,
-    );
-    if (binding && !bindingNamePattern.test(binding)) {
-      issues.push({
-        path: `${path}.binding`,
-        message: "must match binding name syntax",
-      });
-    }
-    const alias =
-      optionalStringField(entry, "alias", `${path}.alias`, issues) ??
-        binding;
-    if (alias && !bindingNamePattern.test(alias)) {
-      issues.push({
-        path: `${path}.alias`,
-        message: "must match binding name syntax",
-      });
-    }
-    if (alias && seenAliases.has(alias)) {
-      issues.push({ path: `${path}.alias`, message: "must be unique" });
-    } else if (alias) seenAliases.add(alias);
-
-    const service = serviceImportStringField(
-      entry,
-      "service",
-      `${path}.service`,
-      issues,
-    );
-    if (service && !serviceIdentifierPattern.test(service)) {
-      issues.push({
-        path: `${path}.service`,
-        message: "must be a forward 3-level service identifier",
-      });
-    }
-    const endpointRoles = validateOptionalStringArray(
-      entry.endpointRoles,
-      `${path}.endpointRoles`,
-      issues,
-    );
-    if (!endpointRoles || endpointRoles.length < 1) {
-      issues.push({
-        path: `${path}.endpointRoles`,
-        message: "must contain at least one endpoint role",
-      });
-    } else if (endpointRoles.some((role) => !endpointRolePattern.test(role))) {
-      issues.push({
-        path: `${path}.endpointRoles`,
-        message: "must contain endpoint role identifiers",
-      });
-    }
-    const refreshPolicy = validateServiceImportRefreshPolicy(
-      entry.refreshPolicy,
-      `${path}.refreshPolicy`,
-      issues,
-    );
-    if (
-      binding && alias && service && endpointRoles && endpointRoles.length > 0
-    ) {
-      imports.push({
-        binding,
-        alias,
-        service,
-        endpointRoles,
-        ...(refreshPolicy ? { refreshPolicy } : {}),
-      });
-    }
-  }
-  return imports.sort((a, b) => a.alias.localeCompare(b.alias));
-}
-
-function serviceImportStringField(
-  record: Record<string, unknown>,
-  key: string,
-  path: string,
-  issues: InstallableAppValidationIssue[],
-): string {
-  const value = record[key];
-  if (typeof value === "string" && value.length > 0) return value;
-  issues.push({ path, message: "is required" });
-  return "";
-}
-
 function bindingAllowedKeys(
   type: InstallableAppBindingType,
 ): readonly string[] {
@@ -959,44 +824,6 @@ function bindingRequired(
   return booleanField(record, "required", path, issues);
 }
 
-function validateServiceImportRefreshPolicy(
-  value: unknown,
-  path: string,
-  issues: InstallableAppValidationIssue[],
-): Record<string, unknown> | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) {
-    issues.push({ path, message: "must be an object" });
-    return undefined;
-  }
-  unknownKeys(value, path, ["kind", "ttl", "triggers"], issues);
-  if (value.kind === "ttl") {
-    if (typeof value.ttl !== "string" || !ttlDurationPattern.test(value.ttl)) {
-      issues.push({
-        path: `${path}.ttl`,
-        message: "must be a duration such as 300s or 1h",
-      });
-      return undefined;
-    }
-    return { kind: "ttl", ttl: value.ttl };
-  }
-  if (value.kind === "event-driven") {
-    if (!Array.isArray(value.triggers)) {
-      issues.push({
-        path: `${path}.triggers`,
-        message: "must be an array",
-      });
-      return undefined;
-    }
-    return { kind: "event-driven", triggers: value.triggers };
-  }
-  issues.push({
-    path: `${path}.kind`,
-    message: "must be ttl or event-driven",
-  });
-  return undefined;
-}
-
 export function parseInstallableAppObject(input: unknown): InstallableApp {
   const issues: InstallableAppValidationIssue[] = [];
   if (!isRecord(input)) {
@@ -1012,7 +839,6 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
     "entry",
     "runtime",
     "bindings",
-    "serviceImports",
     "install",
     "permissions",
     "upgrade",
@@ -1108,8 +934,6 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
   ) as InstallableAppRuntimeMode[];
 
   const bindings = parseBindings(input, issues);
-  const serviceImports = parseServiceImports(input, issues);
-
   const install = requiredRecord(input, "install", issues);
   unknownKeys(install, "install", [
     "healthcheckPath",
@@ -1168,7 +992,6 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
     entry: { manifest },
     runtime: { modes },
     bindings,
-    serviceImports,
     install: { healthcheckPath, postInstallLaunchPath },
     permissions: { requested },
     ...(upgrade ? { upgrade } : {}),
@@ -1286,6 +1109,7 @@ export function buildInstallPreview(
     readonly appManifestDigest?: string;
     readonly compiledManifestDigest?: string;
     readonly compatibilityWarnings?: readonly string[];
+    readonly now?: Date;
   } = {},
 ): InstallPreview {
   const bindings = Object.entries(app.bindings).map(([name, binding]) => ({
@@ -1294,7 +1118,6 @@ export function buildInstallPreview(
     required: binding.required,
     ...(binding.redirectPaths ? { redirectPaths: binding.redirectPaths } : {}),
   })).sort((a, b) => a.name.localeCompare(b.name));
-  const serviceImports = buildInstallServiceImportPreview(app);
   const meteredBindingCount =
     bindings.filter((binding) =>
       binding.type === "database.postgres@v1" ||
@@ -1308,11 +1131,34 @@ export function buildInstallPreview(
   if (app.compatibility?.kernel) requirements.kernel = app.compatibility.kernel;
   const permissionDigest = digestJson({
     bindingKinds: bindings.map((binding) => binding.type).sort(),
-    serviceImports: app.serviceImports,
     grants: [...app.permissions.requested].sort(),
   });
+  const risk = installPreviewRisk({
+    verifiedPublisher: !!app.metadata.signingKeyFingerprint,
+    pinnedSource: isPinnedSource(app),
+    requiredMeteredBindingCount: bindings.filter((binding) =>
+      binding.required &&
+      (binding.type === "database.postgres@v1" ||
+        binding.type === "object-store.s3-compatible@v1" ||
+        binding.type === "domain.http@v1")
+    ).length,
+  });
+  const now = options.now ?? new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60_000).toISOString();
+  const previewId = `preview_${
+    digestJson({
+      appId: app.metadata.id,
+      source: app.source,
+      bindings,
+      permissions: app.permissions.requested,
+      appManifestDigest: options.appManifestDigest,
+      compiledManifestDigest: options.compiledManifestDigest,
+    }).slice("sha256:".length, "sha256:".length + 24)
+  }` as const;
   return {
     kind: "takosumi-git.install-preview@v1",
+    previewId,
+    expiresAt,
     app: {
       id: app.metadata.id,
       name: app.metadata.name,
@@ -1341,7 +1187,6 @@ export function buildInstallPreview(
     },
     runtime: { modes: app.runtime.modes },
     bindings,
-    serviceImports,
     permissions: { requested: app.permissions.requested },
     permissionDigest,
     cost: {
@@ -1350,11 +1195,36 @@ export function buildInstallPreview(
       note:
         "Cost is provider-specific until AppInstallation binding resolution runs.",
     },
+    risk,
+    approvalRequired: risk.level !== "low" || meteredBindingCount > 0,
     compatibility: {
       requirements,
       warnings: options.compatibilityWarnings ?? [],
     },
   };
+}
+
+function installPreviewRisk(input: {
+  readonly verifiedPublisher: boolean;
+  readonly pinnedSource: boolean;
+  readonly requiredMeteredBindingCount: number;
+}): InstallPreview["risk"] {
+  const reasons: string[] = [];
+  if (!input.verifiedPublisher) reasons.push("publisher is not verified");
+  if (!input.pinnedSource) {
+    reasons.push("source is not pinned to an immutable ref");
+  }
+  if (input.requiredMeteredBindingCount > 0) {
+    reasons.push(
+      `${input.requiredMeteredBindingCount} required metered binding(s) need provider approval`,
+    );
+  }
+  const level = !input.verifiedPublisher || !input.pinnedSource
+    ? "high"
+    : input.requiredMeteredBindingCount > 0
+    ? "medium"
+    : "low";
+  return { level, reasons };
 }
 
 function renderHumanPreview(preview: InstallPreview): string {
@@ -1364,6 +1234,7 @@ function renderHumanPreview(preview: InstallPreview): string {
     `publisher: ${preview.publisher.id} (${
       preview.publisher.verified ? "verified" : "unverified"
     })`,
+    `preview: ${preview.previewId} expires ${preview.expiresAt}`,
     `source: ${preview.source.git} @ ${preview.source.ref}`,
     `entry manifest: ${preview.source.manifestPath}${
       preview.source.compiledManifestDigest
@@ -1386,19 +1257,12 @@ function renderHumanPreview(preview: InstallPreview): string {
       ? preview.permissions.requested.map((permission) => `  - ${permission}`)
       : ["  - none"]),
     `cost: ${preview.cost.estimate} (${preview.cost.meteredBindingCount} metered binding(s))`,
+    `risk: ${preview.risk.level}${
+      preview.approvalRequired ? " (approval required)" : ""
+    }`,
   ];
   if (preview.source.appManifestDigest) {
     lines.push(`app manifest: ${preview.source.appManifestDigest}`);
-  }
-  if (preview.serviceImports.length > 0) {
-    lines.push("service imports:");
-    for (const serviceImport of preview.serviceImports) {
-      lines.push(
-        `  - ${serviceImport.alias}: ${serviceImport.service} roles=${
-          serviceImport.endpointRoles.join(",")
-        }`,
-      );
-    }
   }
   if (preview.compatibility.warnings.length > 0) {
     lines.push("warnings:");
@@ -1409,47 +1273,23 @@ function renderHumanPreview(preview: InstallPreview): string {
   return `${lines.join("\n")}\n`;
 }
 
-export function buildInstallServiceImportPreview(
-  app: InstallableApp,
-): readonly InstallServiceImportPreview[] {
-  return app.serviceImports
-    .map((serviceImport) => ({
-      binding: serviceImport.binding,
-      alias: serviceImport.alias,
-      service: serviceImport.service,
-      endpointRoles: serviceImport.endpointRoles,
-      ...(serviceImport.refreshPolicy
-        ? { refreshPolicy: serviceImport.refreshPolicy }
-        : {}),
-    }))
-    .sort((a, b) => a.alias.localeCompare(b.alias));
-}
-
-export function buildKernelServiceImports(
-  app: InstallableApp,
-): readonly KernelManifestServiceImport[] {
-  return buildInstallServiceImportPreview(app).map((entry) => ({
-    alias: entry.alias,
-    service: entry.service,
-    ...(entry.refreshPolicy ? { refreshPolicy: entry.refreshPolicy } : {}),
-  }));
-}
-
 export function compileInstallManifest(
-  app: InstallableApp,
+  _app: InstallableApp,
   manifestText: string,
+  options: { readonly allowInstallerPlaceholders?: boolean } = {},
 ): CompiledInstallManifest {
   const parsed = parseYaml(manifestText);
   if (!isRecord(parsed)) {
     throw new Error("entry manifest must be a YAML object");
   }
-  const serviceImports = buildKernelServiceImports(app);
-  const manifest = mergeKernelServiceImports(parsed, serviceImports);
-  assertNoInstallerPlaceholders(manifest);
+  const manifest = parsed;
+  assertNoForbiddenKernelManifestFields(manifest, "entry manifest");
+  if (!options.allowInstallerPlaceholders) {
+    assertNoInstallerPlaceholders(manifest);
+  }
   return {
     manifest,
     digest: digestJson(manifest),
-    serviceImports,
   };
 }
 
@@ -1480,51 +1320,25 @@ function assertNoInstallerPlaceholders(
   }
 }
 
-function mergeKernelServiceImports(
+export function assertNoForbiddenKernelManifestFields(
   manifest: Record<string, unknown>,
-  serviceImports: readonly KernelManifestServiceImport[],
-): Record<string, unknown> {
-  if (serviceImports.length === 0) return manifest;
-  const existingRaw = manifest.imports;
-  if (existingRaw !== undefined && !Array.isArray(existingRaw)) {
-    throw new Error("entry manifest imports must be an array");
-  }
-  const imports = existingRaw === undefined
-    ? []
-    : existingRaw.map((entry, index) => {
-      if (!isRecord(entry)) {
-        throw new Error(`entry manifest imports[${index}] must be an object`);
-      }
-      return entry;
-    });
-  const importsByAlias = new Map<string, Record<string, unknown>>();
-  for (const entry of imports) {
-    if (typeof entry.alias === "string") importsByAlias.set(entry.alias, entry);
-  }
-  const merged = [...imports];
-  for (const serviceImport of serviceImports) {
-    const existing = importsByAlias.get(serviceImport.alias);
-    if (existing) {
-      if (
-        existing.service !== serviceImport.service ||
-        digestJson(existing.refreshPolicy ?? {}) !==
-          digestJson(serviceImport.refreshPolicy ?? {})
-      ) {
-        throw new Error(
-          `entry manifest imports.${serviceImport.alias} conflicts with app.yml serviceImports`,
-        );
-      }
-      continue;
+  label = "manifest",
+): void {
+  for (const field of ["imports", "serviceResolvers", "services"] as const) {
+    if (Object.hasOwn(manifest, field)) {
+      throw new Error(
+        `${label}.${field} is forbidden; takosumi-git only deploys JSON-LD Shape manifests`,
+      );
     }
-    merged.push({
-      alias: serviceImport.alias,
-      service: serviceImport.service,
-      ...(serviceImport.refreshPolicy
-        ? { refreshPolicy: serviceImport.refreshPolicy }
-        : {}),
-    });
   }
-  return { ...manifest, imports: merged };
+  if (
+    isRecord(manifest.metadata) &&
+    Object.hasOwn(manifest.metadata, "takosumiServiceImports")
+  ) {
+    throw new Error(
+      `${label}.metadata.takosumiServiceImports is forbidden; service import metadata is not part of the current Shape manifest`,
+    );
+  }
 }
 
 async function compileInstallWorkflowRefs(input: {
@@ -1819,13 +1633,6 @@ export interface ParsedInstallArgs {
   readonly runtimeBaseUrl?: string;
   readonly endpoint?: string;
   readonly deployToken?: string;
-  readonly serviceResolvers?: readonly InstallServiceResolverConfig[];
-}
-
-export interface InstallServiceResolverConfig {
-  readonly kind: "anchor";
-  readonly url: string;
-  readonly publicKey: string;
 }
 
 export interface InstallSourceCheckout {
@@ -1860,6 +1667,7 @@ export function parseInstallArgs(
   if (subcommand !== "preview" && subcommand !== "apply") {
     throw new Error(`unknown install command '${subcommand}'`);
   }
+  rejectRemovedServiceResolverOptions(rest);
   const flags = parseArgs(rest as string[], {
     string: [
       "cwd",
@@ -1878,8 +1686,6 @@ export function parseInstallArgs(
       "runtime-base-url",
       "endpoint",
       "deploy-token",
-      "service-resolver-url",
-      "service-resolver-public-key",
     ],
     boolean: ["json"],
     default: {
@@ -1927,12 +1733,6 @@ export function parseInstallArgs(
     ? (flags["deploy-token"] as string | undefined) ??
       env.get("TAKOSUMI_DEPLOY_TOKEN") ?? env.get("TAKOSUMI_TOKEN")
     : (flags["deploy-token"] as string | undefined);
-  const serviceResolverUrl = (flags["service-resolver-url"] as
-    | string
-    | undefined) ?? env.get("TAKOSUMI_SERVICE_RESOLVER_URL");
-  const serviceResolverPublicKey = (flags["service-resolver-public-key"] as
-    | string
-    | undefined) ?? env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
   if (sourceCommit && !fullCommitPattern.test(sourceCommit)) {
     throw new Error("--source-commit must be a 40-char SHA");
   }
@@ -1948,11 +1748,6 @@ export function parseInstallArgs(
     if (manifest) validateGitInstallPathOption("--manifest", manifest);
   } else if (sourceRef) {
     throw new Error("--ref requires a Git URL source");
-  }
-  if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
-    throw new Error(
-      "--service-resolver-url and --service-resolver-public-key must be provided together",
-    );
   }
   if (subcommand === "apply") {
     if (!accountsUrl) {
@@ -1998,16 +1793,22 @@ export function parseInstallArgs(
     ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
     ...(endpoint ? { endpoint } : {}),
     ...(deployToken ? { deployToken } : {}),
-    ...(serviceResolverUrl && serviceResolverPublicKey
-      ? {
-        serviceResolvers: [{
-          kind: "anchor" as const,
-          url: serviceResolverUrl,
-          publicKey: serviceResolverPublicKey,
-        }],
-      }
-      : {}),
   };
+}
+
+function rejectRemovedServiceResolverOptions(args: readonly string[]): void {
+  if (
+    args.some((arg) =>
+      arg === "--service-resolver-url" ||
+      arg.startsWith("--service-resolver-url=") ||
+      arg === "--service-resolver-public-key" ||
+      arg.startsWith("--service-resolver-public-key=")
+    )
+  ) {
+    throw new Error(
+      "service resolver options were removed; manifests must not declare service imports or serviceResolvers",
+    );
+  }
 }
 
 function parseRuntimeMode(value: unknown): InstallableAppRuntimeMode {
@@ -2103,10 +1904,6 @@ APPLY OPTIONS:
                         app runtime base URL for OIDC redirect materialization
   --endpoint <url>      takosumi kernel endpoint for deploy (or TAKOSUMI_ENDPOINT)
   --deploy-token <tok>  kernel deploy token (or TAKOSUMI_DEPLOY_TOKEN/TAKOSUMI_TOKEN)
-  --service-resolver-url <url>
-                        service descriptor anchor URL for kernel deploy
-  --service-resolver-public-key <key>
-                        Ed25519 public key for the anchor
 `;
 
 interface InstallContext {
@@ -2163,7 +1960,9 @@ async function loadInstallContext(
     const compiledManifest = manifestText
       ? options.compileWorkflows
         ? await compileInstallWorkflowRefs({
-          compiled: compileInstallManifest(app, manifestText),
+          compiled: compileInstallManifest(app, manifestText, {
+            allowInstallerPlaceholders: true,
+          }),
           projectRoot: repoRoot,
           workflowsDir: join(repoRoot, ".takosumi", "workflows"),
           executorFactory: options.executorFactory,
@@ -2331,8 +2130,7 @@ function installOidcClientCreateRequests(
   runtimeBaseUrl: string | undefined,
 ): InstallOidcClientCreateRequest[] {
   if (!runtimeBaseUrl) return [];
-  const serviceId = firstAuthServiceImport(app)?.service ??
-    "takosumi.account.auth@v1";
+  const namespacePath = "operator.identity.oidc";
   return Object.entries(app.bindings)
     .filter(([, binding]) => binding.type === "identity.oidc@v1")
     .map(([name, binding]) => {
@@ -2342,7 +2140,7 @@ function installOidcClientCreateRequests(
       );
       return {
         binding: name,
-        serviceId,
+        namespacePath,
         redirectUris: redirectPaths.map((path) =>
           absoluteUrl(runtimeBaseUrl, path)
         ),
@@ -2352,15 +2150,6 @@ function installOidcClientCreateRequests(
       };
     })
     .sort((a, b) => a.binding.localeCompare(b.binding));
-}
-
-function firstAuthServiceImport(
-  app: InstallableApp,
-): InstallServiceImportPreview | undefined {
-  return buildInstallServiceImportPreview(app).find((serviceImport) =>
-    serviceImport.service === "takosumi.account.auth@v1" &&
-    serviceImport.endpointRoles.includes("oidc-issuer")
-  );
 }
 
 function oidcClientAuthMethodForAccounts(
@@ -2433,7 +2222,6 @@ export async function applyInstall(
     },
     mode,
     createdBySubject: options.createdBySubject,
-    serviceImports: buildInstallServiceImportPreview(app),
     ...(oidcClients.length > 0 ? { oidcClients } : {}),
     bindings: appBindingCreateRequests(app),
     grants: app.permissions.requested.map((capability) => ({
@@ -2452,7 +2240,7 @@ export async function applyInstall(
     );
   }
   if (deployEndpoint) {
-    buildInstallDeployRequest(compiledManifest, options.serviceResolvers ?? []);
+    buildInstallDeployRequest(compiledManifest);
   }
   const response = await (options.fetch ?? fetch)(
     `${normalizeBaseUrl(options.accountsUrl)}/v1/installations`,
@@ -2499,10 +2287,11 @@ export async function applyInstall(
     assertRequiredProviderBindingsMaterialized(app, accounts);
     const deployRequest = buildInstallDeployRequest(
       compiledManifest,
-      options.serviceResolvers ?? [],
       {
         app,
         accounts,
+        accountId: options.accountId,
+        spaceId: options.spaceId,
         runtimeBaseUrl: options.runtimeBaseUrl,
       },
     );
@@ -2717,10 +2506,11 @@ function requiredBindingEnvKeys(
 
 function buildInstallDeployRequest(
   compiledManifest: CompiledInstallManifest | undefined,
-  serviceResolvers: readonly InstallServiceResolverConfig[],
   materialization?: {
     readonly app: InstallableApp;
     readonly accounts: AccountsInstallResponseSummary;
+    readonly accountId?: string;
+    readonly spaceId?: string;
     readonly runtimeBaseUrl?: string;
   },
 ): { readonly mode: "apply"; readonly manifest: ManifestEnvelope } {
@@ -2728,24 +2518,340 @@ function buildInstallDeployRequest(
     throw new Error("entry manifest is required for install apply deploy");
   }
   const manifest = structuredClone(compiledManifest.manifest);
-  const serviceImports = readKernelManifestServiceImports(manifest);
-  applyInstallServiceResolvers({
-    manifest,
-    serviceImportCount: serviceImports.length,
-    serviceResolvers,
-  });
+  assertNoForbiddenKernelManifestFields(manifest);
   if (materialization) {
+    applyAccountsPlaceholders({
+      manifest,
+      app: materialization.app,
+      accounts: materialization.accounts,
+      accountId: materialization.accountId,
+      spaceId: materialization.spaceId,
+      runtimeBaseUrl: materialization.runtimeBaseUrl,
+    });
     applyAccountsRuntimeEnv({
       manifest,
       app: materialization.app,
       accounts: materialization.accounts,
       runtimeBaseUrl: materialization.runtimeBaseUrl,
     });
+    assertNoInstallerPlaceholders(manifest);
   }
   return {
     mode: "apply",
     manifest: manifest as unknown as ManifestEnvelope,
   };
+}
+
+function applyAccountsPlaceholders(input: {
+  manifest: Record<string, unknown>;
+  app: InstallableApp;
+  accounts: AccountsInstallResponseSummary;
+  accountId?: string;
+  spaceId?: string;
+  runtimeBaseUrl?: string;
+}): void {
+  replaceInstallerPlaceholders(input.manifest, "$", input);
+}
+
+function replaceInstallerPlaceholders(
+  value: unknown,
+  path: string,
+  context: {
+    app: InstallableApp;
+    accounts: AccountsInstallResponseSummary;
+    accountId?: string;
+    spaceId?: string;
+    runtimeBaseUrl?: string;
+  },
+): unknown {
+  if (typeof value === "string") {
+    const matches = [...value.matchAll(installerPlaceholderGlobalPattern)];
+    if (matches.length === 0) return value;
+    if (matches.length === 1 && matches[0][0] === value) {
+      return resolveInstallerPlaceholder(matches[0], path, context);
+    }
+    return value.replace(
+      installerPlaceholderGlobalPattern,
+      (...args: unknown[]) => {
+        const match = args as [string, string, string, ...unknown[]];
+        const resolved = resolveInstallerPlaceholder(match, path, context);
+        if (typeof resolved === "string") return resolved;
+        if (typeof resolved === "number" || typeof resolved === "boolean") {
+          return String(resolved);
+        }
+        throw new Error(
+          `entry manifest contains non-scalar installer placeholder at ${path}: ${
+            match[0]
+          }`,
+        );
+      },
+    );
+  }
+  if (Array.isArray(value)) {
+    for (const [index, entry] of value.entries()) {
+      value[index] = replaceInstallerPlaceholders(
+        entry,
+        `${path}[${index}]`,
+        context,
+      );
+    }
+    return value;
+  }
+  if (!isRecord(value)) return value;
+  for (const [key, entry] of Object.entries(value)) {
+    value[key] = replaceInstallerPlaceholders(entry, `${path}.${key}`, context);
+  }
+  return value;
+}
+
+function resolveInstallerPlaceholder(
+  match: readonly unknown[],
+  path: string,
+  context: {
+    app: InstallableApp;
+    accounts: AccountsInstallResponseSummary;
+    accountId?: string;
+    spaceId?: string;
+    runtimeBaseUrl?: string;
+  },
+): unknown {
+  const placeholder = String(match[0]);
+  const namespace = String(match[1]);
+  const keyPath = String(match[2]);
+  if (namespace === "imports") {
+    throw new Error(
+      `entry manifest contains removed imports placeholder at ${path}: ${placeholder}`,
+    );
+  }
+  if (namespace === "refs") {
+    throw new Error(
+      `entry manifest contains legacy refs placeholder at ${path}: ${placeholder}`,
+    );
+  }
+  if (namespace === "installation") {
+    return resolveInstallationPlaceholder(keyPath, placeholder, context);
+  }
+  if (namespace === "bindings" || namespace === "secrets") {
+    const dot = keyPath.indexOf(".");
+    const bindingName = dot === -1 ? keyPath : keyPath.slice(0, dot);
+    const bindingKey = dot === -1 ? "" : keyPath.slice(dot + 1);
+    return resolveBindingPlaceholder({
+      ...context,
+      bindingName,
+      bindingKey,
+      secret: namespace === "secrets",
+      placeholder,
+      path,
+    });
+  }
+  throw new Error(
+    `entry manifest contains unresolved installer placeholder at ${path}: ${placeholder}`,
+  );
+}
+
+function resolveInstallationPlaceholder(
+  keyPath: string,
+  placeholder: string,
+  context: {
+    accounts: AccountsInstallResponseSummary;
+    accountId?: string;
+    spaceId?: string;
+    runtimeBaseUrl?: string;
+  },
+): unknown {
+  const values: Record<string, unknown> = {
+    id: context.accounts.installationId,
+    installationId: context.accounts.installationId,
+    accountId: context.accountId,
+    spaceId: context.spaceId,
+    baseUrl: context.runtimeBaseUrl
+      ? normalizeBaseUrl(context.runtimeBaseUrl)
+      : undefined,
+  };
+  return requiredPlaceholderValue(values[keyPath], placeholder);
+}
+
+function resolveBindingPlaceholder(input: {
+  app: InstallableApp;
+  accounts: AccountsInstallResponseSummary;
+  runtimeBaseUrl?: string;
+  bindingName: string;
+  bindingKey: string;
+  secret: boolean;
+  placeholder: string;
+  path: string;
+}): unknown {
+  const binding = input.app.bindings[input.bindingName];
+  if (!binding) {
+    throw new Error(
+      `entry manifest references unknown binding at ${input.path}: ${input.placeholder}`,
+    );
+  }
+  const materialized = bindingRecordForName(input.accounts, input.bindingName);
+  if (
+    binding.required &&
+    (!materialized ||
+      (stringProperty(materialized, "config_ref", "configRef") ?? "")
+        .startsWith("takosumi-git://"))
+  ) {
+    throw new Error(
+      `entry manifest references unmaterialized binding at ${input.path}: ${input.placeholder}`,
+    );
+  }
+  const values = input.secret
+    ? secretPlaceholderValues(binding.type, input)
+    : bindingPlaceholderValues(binding.type, input);
+  return requiredPlaceholderValue(values[input.bindingKey], input.placeholder);
+}
+
+function bindingPlaceholderValues(
+  type: InstallableAppBindingType,
+  input: {
+    accounts: AccountsInstallResponseSummary;
+    runtimeBaseUrl?: string;
+    bindingName: string;
+  },
+): Record<string, unknown> {
+  if (type === "identity.oidc@v1") {
+    const oidcClient = input.accounts.oidcClient ?? {};
+    const redirectUris = stringArrayProperty(
+      oidcClient,
+      "redirect_uris",
+      "redirectUris",
+    );
+    return {
+      issuerUrl: stringProperty(oidcClient, "issuer_url", "issuerUrl"),
+      clientId: stringProperty(oidcClient, "client_id", "clientId"),
+      redirectUri: redirectUris[0],
+      redirectUris,
+      ...indexedValues("redirectUris", redirectUris),
+    };
+  }
+  if (type === "database.postgres@v1") {
+    return postgresPlaceholderValues(input.accounts.bindingEnv?.DATABASE_URL);
+  }
+  if (type === "object-store.s3-compatible@v1") {
+    const env = input.accounts.bindingEnv ?? {};
+    return {
+      endpoint: env.BLOB_ENDPOINT,
+      bucket: env.BLOB_BUCKET,
+      accessKey: env.BLOB_ACCESS_KEY,
+      region: env.BLOB_REGION,
+    };
+  }
+  if (type === "domain.http@v1") {
+    const url = input.runtimeBaseUrl
+      ? normalizeBaseUrl(input.runtimeBaseUrl)
+      : undefined;
+    return {
+      hostname: url ? new URL(url).hostname : undefined,
+      url,
+    };
+  }
+  if (type === "deploy-intent.gitops@v1") {
+    const env = input.accounts.bindingEnv ?? {};
+    const binding = bindingRecordForName(input.accounts, input.bindingName) ??
+      {};
+    return {
+      driver: env.DEPLOY_INTENT_DRIVER ?? "gitops",
+      remote: env.DEPLOY_INTENT_REMOTE,
+      branch: stringProperty(binding, "branch", "branch"),
+      writePathPrefix: stringProperty(
+        binding,
+        "write_path_prefix",
+        "writePathPrefix",
+      ),
+    };
+  }
+  if (type === "install-launch-token@v1") {
+    const launchConfig = input.accounts.launchTokenConfig ?? {};
+    const env = isRecord(launchConfig.env) ? launchConfig.env : {};
+    return {
+      publicKey: stringFromUnknown(env.INSTALL_LAUNCH_PUBLIC_KEY),
+      audience: stringFromUnknown(env.INSTALL_LAUNCH_AUDIENCE) ??
+        stringProperty(launchConfig, "audience", "audience"),
+      issuer: stringFromUnknown(env.INSTALL_LAUNCH_ISSUER) ??
+        stringProperty(launchConfig, "issuer", "issuer"),
+      algorithm: stringProperty(launchConfig, "algorithm", "algorithm") ??
+        "RS256",
+      kid: stringProperty(launchConfig, "kid", "kid"),
+      consumePath: input.accounts.installationId
+        ? `/v1/installations/${input.accounts.installationId}/launch-token/consume`
+        : undefined,
+    };
+  }
+  return {};
+}
+
+function secretPlaceholderValues(
+  type: InstallableAppBindingType,
+  input: { accounts: AccountsInstallResponseSummary },
+): Record<string, unknown> {
+  if (type === "identity.oidc@v1") {
+    return { clientSecret: input.accounts.oidcClientSecret };
+  }
+  if (type === "database.postgres@v1") {
+    return postgresPlaceholderValues(input.accounts.bindingEnv?.DATABASE_URL);
+  }
+  if (type === "object-store.s3-compatible@v1") {
+    return { secretKey: input.accounts.bindingEnv?.BLOB_SECRET_KEY };
+  }
+  if (type === "deploy-intent.gitops@v1") {
+    return { token: input.accounts.bindingEnv?.DEPLOY_INTENT_TOKEN };
+  }
+  return {};
+}
+
+function postgresPlaceholderValues(
+  urlValue: string | undefined,
+): Record<string, unknown> {
+  if (!urlValue) return {};
+  try {
+    const url = new URL(urlValue);
+    return {
+      host: url.hostname,
+      port: url.port || "5432",
+      database: decodeURIComponent(url.pathname.replace(/^\//, "")),
+      username: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      sslMode: url.searchParams.get("sslmode") ?? "require",
+      url: urlValue,
+    };
+  } catch {
+    return { url: urlValue };
+  }
+}
+
+function bindingRecordForName(
+  accounts: AccountsInstallResponseSummary,
+  name: string,
+): Record<string, unknown> | undefined {
+  return accounts.bindings.find((entry) =>
+    stringProperty(entry, "name", "name") === name
+  );
+}
+
+function indexedValues(
+  prefix: string,
+  values: readonly unknown[],
+): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  values.forEach((value, index) => {
+    output[`${prefix}[${index}]`] = value;
+  });
+  return output;
+}
+
+function requiredPlaceholderValue(
+  value: unknown,
+  placeholder: string,
+): unknown {
+  if (value === undefined || value === null || value === "") {
+    throw new Error(
+      `entry manifest contains unresolved installer placeholder: ${placeholder}`,
+    );
+  }
+  return value;
 }
 
 function applyAccountsRuntimeEnv(input: {
@@ -2865,56 +2971,6 @@ function hasEnvKey(env: Record<string, unknown>, key: string): boolean {
   return Object.keys(env).some((existing) =>
     existing.toUpperCase() === normalized
   );
-}
-
-function readKernelManifestServiceImports(
-  manifest: Record<string, unknown>,
-): readonly KernelManifestServiceImport[] {
-  const imports = manifest.imports;
-  if (imports === undefined) return [];
-  if (!Array.isArray(imports)) {
-    throw new Error("manifest.imports must be an array");
-  }
-  return imports.map((entry, index) => {
-    if (!isRecord(entry)) {
-      throw new Error(`manifest.imports[${index}] must be an object`);
-    }
-    if (typeof entry.alias !== "string" || typeof entry.service !== "string") {
-      throw new Error(
-        `manifest.imports[${index}] must declare alias and service`,
-      );
-    }
-    return {
-      alias: entry.alias,
-      service: entry.service,
-      ...(entry.refreshPolicy !== undefined
-        ? { refreshPolicy: entry.refreshPolicy as Record<string, unknown> }
-        : {}),
-    };
-  });
-}
-
-function applyInstallServiceResolvers(input: {
-  manifest: Record<string, unknown>;
-  serviceImportCount: number;
-  serviceResolvers: readonly InstallServiceResolverConfig[];
-}): void {
-  if (input.serviceImportCount === 0) return;
-  const existing = input.manifest.serviceResolvers;
-  if (existing !== undefined && !Array.isArray(existing)) {
-    throw new Error("manifest.serviceResolvers must be an array");
-  }
-  if (Array.isArray(existing) && existing.length > 0) return;
-  if (input.serviceResolvers.length === 0) {
-    throw new Error(
-      "service imports require serviceResolvers; pass --service-resolver-url and --service-resolver-public-key",
-    );
-  }
-  input.manifest.serviceResolvers = input.serviceResolvers.map((resolver) => ({
-    kind: resolver.kind,
-    url: resolver.url,
-    publicKey: resolver.publicKey,
-  }));
 }
 
 export class InstallApplyError extends Error {
@@ -3079,6 +3135,10 @@ function stringProperty(
   camelKey: string,
 ): string | undefined {
   const value = record[snakeKey] ?? record[camelKey];
+  return stringFromUnknown(value);
+}
+
+function stringFromUnknown(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 

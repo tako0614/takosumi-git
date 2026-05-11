@@ -86,7 +86,7 @@ const PINNED_APP_YML = VALID_APP_YML.replace(
   "ref: v1.2.3\n  commit: 0123456789abcdef0123456789abcdef01234567",
 );
 
-const SERVICE_IMPORT_APP_YML = VALID_APP_YML.replace(
+const FORBIDDEN_SERVICE_IMPORT_APP_YML = VALID_APP_YML.replace(
   "install:\n",
   `serviceImports:
   - binding: account-auth
@@ -194,6 +194,8 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
 
   const preview = buildInstallPreview(app);
   assertEquals(preview.kind, "takosumi-git.install-preview@v1");
+  assert(preview.previewId.startsWith("preview_"));
+  assert(new Date(preview.expiresAt).getTime() > Date.now());
   assertEquals(preview.publisher.verified, true);
   assertEquals(preview.source.pinned, true);
   assertEquals(preview.bindings.map((binding) => binding.name), [
@@ -203,6 +205,27 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
     "database",
   ]);
   assert(preview.permissionDigest.startsWith("sha256:"));
+  assertEquals(preview.risk.level, "medium");
+  assertEquals(preview.approvalRequired, true);
+});
+
+Deno.test("buildInstallPreview records approval and risk metadata", () => {
+  const app = parseInstallableAppYaml(VALID_APP_YML.replace(
+    "  signingKeyFingerprint: SHA256:abcd\n",
+    "",
+  ));
+  const preview = buildInstallPreview(app, {
+    now: new Date("2026-05-11T00:00:00.000Z"),
+  });
+
+  assertEquals(preview.expiresAt, "2026-05-11T00:15:00.000Z");
+  assertEquals(preview.publisher.verified, false);
+  assertEquals(preview.risk.level, "high");
+  assertEquals(
+    preview.risk.reasons.includes("publisher is not verified"),
+    true,
+  );
+  assertEquals(preview.approvalRequired, true);
 });
 
 Deno.test("parseInstallableAppYaml accepts Takos resource AppGrant scopes", () => {
@@ -239,61 +262,39 @@ Deno.test("parseInstallableAppYaml accepts Takos resource AppGrant scopes", () =
   ]);
 });
 
-Deno.test("parseInstallableAppYaml accepts service import metadata", () => {
-  const app = parseInstallableAppYaml(
-    VALID_APP_YML.replace(
-      "install:\n",
-      `serviceImports:
-  - binding: account-auth
-    service: takosumi.account.auth@v1
-    alias: account-auth
-    endpointRoles:
-      - oidc-issuer
-      - install-launch
-    refreshPolicy:
-      kind: ttl
-      ttl: 300s
-install:\n`,
-    ),
+Deno.test("parseInstallableAppYaml rejects serviceImports metadata", () => {
+  const error = assertThrows(
+    () => parseInstallableAppYaml(FORBIDDEN_SERVICE_IMPORT_APP_YML),
+    InstallableAppValidationError,
   );
 
-  assertEquals(app.serviceImports, [{
-    binding: "account-auth",
-    service: "takosumi.account.auth@v1",
-    alias: "account-auth",
-    endpointRoles: ["oidc-issuer", "install-launch"],
-    refreshPolicy: { kind: "ttl", ttl: "300s" },
-  }]);
-  const preview = buildInstallPreview(app);
-  assertEquals(preview.serviceImports, [{
-    binding: "account-auth",
-    alias: "account-auth",
-    service: "takosumi.account.auth@v1",
-    endpointRoles: ["oidc-issuer", "install-launch"],
-    refreshPolicy: { kind: "ttl", ttl: "300s" },
-  }]);
+  assertStringIncludes(error.message, "$.serviceImports is not allowed");
 });
 
-Deno.test("compileInstallManifest injects service imports from app metadata", () => {
-  const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
-  const compiled = compileInstallManifest(app, MANIFEST_YML);
+Deno.test("compileInstallManifest rejects forbidden kernel import fields", () => {
+  const app = parseInstallableAppYaml(VALID_APP_YML);
 
-  assert(compiled.digest.startsWith("sha256:"));
-  assertEquals(compiled.serviceImports, [{
-    alias: "account-auth",
-    service: "takosumi.account.auth@v1",
-    refreshPolicy: { kind: "ttl", ttl: "300s" },
-  }]);
-  assertEquals(compiled.manifest.imports, [{
-    alias: "account-auth",
-    service: "takosumi.account.auth@v1",
-    refreshPolicy: { kind: "ttl", ttl: "300s" },
-  }]);
+  for (
+    const [field, yaml] of [
+      ["imports", "imports: []"],
+      ["serviceResolvers", "serviceResolvers: []"],
+      ["services", "services: []"],
+    ] as const
+  ) {
+    assertThrows(
+      () =>
+        compileInstallManifest(
+          app,
+          MANIFEST_YML.replace("resources: []", `${yaml}\nresources: []`),
+        ),
+      Error,
+      `entry manifest.${field} is forbidden`,
+    );
+  }
 });
 
-Deno.test("compileInstallManifest rejects conflicting manifest imports", () => {
-  const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
-
+Deno.test("compileInstallManifest rejects direct manifest imports", () => {
+  const app = parseInstallableAppYaml(VALID_APP_YML);
   assertThrows(
     () =>
       compileInstallManifest(
@@ -307,7 +308,7 @@ resources: []`,
         ),
       ),
     Error,
-    "conflicts with app.yml serviceImports",
+    "entry manifest.imports is forbidden",
   );
 });
 
@@ -335,25 +336,44 @@ Deno.test("compileInstallManifest rejects unresolved installer placeholders", ()
   );
 });
 
-Deno.test("compileInstallManifest preserves kernel import placeholders", () => {
-  const app = parseInstallableAppYaml(SERVICE_IMPORT_APP_YML);
-  const compiled = compileInstallManifest(
-    app,
-    MANIFEST_YML.replace(
-      "resources: []",
-      `resources:
+Deno.test("compileInstallManifest rejects removed imports placeholders", () => {
+  const app = parseInstallableAppYaml(VALID_APP_YML);
+  assertThrows(
+    () =>
+      compileInstallManifest(
+        app,
+        MANIFEST_YML.replace(
+          "resources: []",
+          `resources:
   - name: api
     shape: web-service@v1
     provider: "@takos/cloudflare-container"
     spec:
       upstream: "\${imports.account-auth.endpoints.oidc-issuer.url}"`,
-    ),
+        ),
+      ),
+    Error,
+    "unresolved installer placeholder",
   );
+});
 
-  const resources = compiled.manifest.resources as Record<string, unknown>[];
-  assertEquals(
-    (resources[0].spec as Record<string, unknown>).upstream,
-    "${imports.account-auth.endpoints.oidc-issuer.url}",
+Deno.test("compileInstallManifest rejects service import metadata", () => {
+  const app = parseInstallableAppYaml(VALID_APP_YML);
+  assertThrows(
+    () =>
+      compileInstallManifest(
+        app,
+        MANIFEST_YML.replace(
+          "metadata:\n  name: hello",
+          `metadata:
+  name: sample-app
+  takosumiServiceImports:
+    account:
+      service: takosumi.account.auth@v1`,
+        ),
+      ),
+    Error,
+    "metadata.takosumiServiceImports is forbidden",
   );
 });
 
@@ -389,7 +409,7 @@ Deno.test("parseInstallableAppYaml rejects unsupported binding catalog entries",
   );
 });
 
-Deno.test("parseInstallableAppYaml rejects malformed service import metadata", () => {
+Deno.test("parseInstallableAppYaml rejects serviceImports as unknown metadata", () => {
   const error = assertThrows(
     () =>
       parseInstallableAppYaml(
@@ -409,18 +429,7 @@ install:\n`,
     InstallableAppValidationError,
   );
 
-  assertStringIncludes(
-    error.message,
-    "serviceImports[0].service must be a forward 3-level service identifier",
-  );
-  assertStringIncludes(
-    error.message,
-    "serviceImports[0].endpointRoles must contain endpoint role identifiers",
-  );
-  assertStringIncludes(
-    error.message,
-    "serviceImports[0].refreshPolicy.ttl must be a duration",
-  );
+  assertStringIncludes(error.message, "$.serviceImports is not allowed");
 });
 
 Deno.test("previewInstall reads app and kernel manifests", async () => {
@@ -526,9 +535,6 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
         TAKOSUMI_RUNTIME_BASE_URL: "https://hello.example",
         TAKOSUMI_ENDPOINT: "https://kernel.example",
         TAKOSUMI_DEPLOY_TOKEN: "deploy-secret",
-        TAKOSUMI_SERVICE_RESOLVER_URL:
-          "https://anchor.example.test/v1/services/",
-        TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY: "ed25519:pub",
       };
       return env[key];
     },
@@ -545,11 +551,19 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.runtimeBaseUrl, "https://hello.example");
   assertEquals(parsed.endpoint, "https://kernel.example");
   assertEquals(parsed.deployToken, "deploy-secret");
-  assertEquals(parsed.serviceResolvers, [{
-    kind: "anchor",
-    url: "https://anchor.example.test/v1/services/",
-    publicKey: "ed25519:pub",
-  }]);
+});
+
+Deno.test("parseInstallArgs rejects removed service resolver flags", () => {
+  assertThrows(
+    () =>
+      parseInstallArgs([
+        "apply",
+        "--service-resolver-url",
+        "https://anchor.example.test/v1/services/",
+      ]),
+    Error,
+    "service resolver options were removed",
+  );
 });
 
 Deno.test("parseInstallArgs accepts Git URL source and immutable ref", () => {
@@ -731,7 +745,7 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
       "takosumi-git://installable-app/example.hello/bindings/auth/sha256:",
     );
     assertEquals(body.bindings[0].secretRefs, []);
-    assertEquals(body.serviceImports, []);
+    assertEquals("serviceImports" in body, false);
     assertEquals(body.oidcClients, undefined);
     assertEquals(body.grants.length, 2);
   } finally {
@@ -739,14 +753,14 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
   }
 });
 
-Deno.test("applyInstall posts service import materialization plan", async () => {
+Deno.test("applyInstall deploys without service import materialization", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
   const requests: Request[] = [];
   try {
     await Deno.mkdir(join(root, ".takosumi"));
     await Deno.writeTextFile(
       join(root, ".takosumi", "app.yml"),
-      SERVICE_IMPORT_APP_YML.replace(
+      VALID_APP_YML.replace(
         "ref: v1.2.3",
         "ref: v1.2.3\n  commit: 0123456789abcdef0123456789abcdef01234567",
       ),
@@ -781,11 +795,6 @@ resources:
       runtimeBaseUrl: "http://localhost:8787",
       endpoint: "http://kernel.example/",
       deployToken: "deploy-secret",
-      serviceResolvers: [{
-        kind: "anchor",
-        url: "https://anchor.example.test/v1/services/",
-        publicKey: "ed25519:pub",
-      }],
       fetch: (input, init) => {
         requests.push(new Request(input, init));
         const url = String(input);
@@ -850,7 +859,7 @@ resources:
           oidc_client: {
             client_id: "toc_1",
             installation_id: "inst_1",
-            service_id: "takosumi.account.auth@v1",
+            namespace_path: "operator.identity.oidc",
             issuer_url: "https://accounts.example",
             redirect_uris: ["http://localhost:8787/auth/oidc/callback"],
           },
@@ -858,10 +867,6 @@ resources:
       },
     });
 
-    assertEquals(
-      result.preview.serviceImports[0].service,
-      "takosumi.account.auth@v1",
-    );
     assertEquals(result.deployment?.status, 200);
     assertEquals(result.statusTransition?.status, 200);
     assertEquals(result.accounts.installationId, "inst_1");
@@ -879,13 +884,7 @@ resources:
     );
     assertEquals(requests.length, 4);
     const body = await requests[0].json();
-    assertEquals(body.serviceImports, [{
-      binding: "account-auth",
-      alias: "account-auth",
-      service: "takosumi.account.auth@v1",
-      endpointRoles: ["oidc-issuer", "install-launch"],
-      refreshPolicy: { kind: "ttl", ttl: "300s" },
-    }]);
+    assertEquals("serviceImports" in body, false);
     assertEquals(
       body.bindings.some((binding: { kind: string }) =>
         binding.kind === "service.import@v1"
@@ -904,7 +903,7 @@ resources:
     );
     assertEquals(body.oidcClients, [{
       binding: "auth",
-      serviceId: "takosumi.account.auth@v1",
+      namespacePath: "operator.identity.oidc",
       redirectUris: ["http://localhost:8787/auth/oidc/callback"],
       allowedScopes: ["openid", "profile"],
       subjectMode: "pairwise",
@@ -922,16 +921,8 @@ resources:
     );
     const deployBody = await requests[2].json();
     assertEquals(deployBody.mode, "apply");
-    assertEquals(deployBody.manifest.imports, [{
-      alias: "account-auth",
-      service: "takosumi.account.auth@v1",
-      refreshPolicy: { kind: "ttl", ttl: "300s" },
-    }]);
-    assertEquals(deployBody.manifest.serviceResolvers, [{
-      kind: "anchor",
-      url: "https://anchor.example.test/v1/services/",
-      publicKey: "ed25519:pub",
-    }]);
+    assertEquals("imports" in deployBody.manifest, false);
+    assertEquals("serviceResolvers" in deployBody.manifest, false);
     assertEquals(
       deployBody.manifest.resources[0].spec.env,
       {
@@ -962,6 +953,170 @@ resources:
       status: "ready",
       reason: "kernel deploy HTTP 200",
     });
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyInstall resolves Accounts binding placeholders before kernel deploy", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(root, ".takosumi"));
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "app.yml"),
+      PINNED_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      `apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: hello
+resources:
+  - shape: web-service@v1
+    name: api
+    provider: "@takos/selfhost-docker-compose"
+    spec:
+      image: ghcr.io/example/hello@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+      port: 8080
+      env:
+        OIDC_ISSUER_URL: \${bindings.auth.issuerUrl}
+        OIDC_CLIENT_ID: \${bindings.auth.clientId}
+        OIDC_CLIENT_SECRET: \${secrets.auth.clientSecret}
+        OIDC_REDIRECT_URI: \${bindings.auth.redirectUris[0]}
+        DATABASE_URL: \${bindings.database.url}
+        DB_HOST: \${bindings.database.host}
+        DB_PASSWORD: \${secrets.database.password}
+        BLOB_ENDPOINT: \${bindings.blob.endpoint}
+        BLOB_SECRET_KEY: \${secrets.blob.secretKey}
+        INSTALL_LAUNCH_PUBLIC_KEY: \${bindings.bootstrap.publicKey}
+        INSTALL_LAUNCH_CONSUME_PATH: \${bindings.bootstrap.consumePath}
+        INSTALLATION_ID: \${installation.id}
+        SPACE_ID: \${installation.spaceId}
+        BASE_URL: \${installation.baseUrl}
+`,
+    );
+
+    await applyInstall({
+      subcommand: "apply",
+      cwd: root,
+      appPath: join(root, ".takosumi", "app.yml"),
+      json: true,
+      accountsUrl: "http://accounts.example/",
+      accountId: "acct_1",
+      spaceId: "space_1",
+      createdBySubject: "tsub_owner",
+      runtimeBaseUrl: "http://localhost:8787",
+      endpoint: "http://kernel.example/",
+      deployToken: "deploy-secret",
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Promise.resolve(Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          }));
+        }
+        if (url.endsWith("/v1/installations/inst_1/launch-token")) {
+          return Promise.resolve(Response.json({
+            issuer: "https://accounts.example",
+            audience: "example.hello",
+            algorithm: "RS256",
+            kid: "launch-test",
+            env: {
+              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+              INSTALL_LAUNCH_AUDIENCE: "example.hello",
+              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+            },
+          }));
+        }
+        if (url.includes("/status")) {
+          return Promise.resolve(Response.json({
+            installation: { id: "inst_1", status: "ready" },
+          }));
+        }
+        return Promise.resolve(Response.json({
+          installation: { id: "inst_1" },
+          binding_env: {
+            DATABASE_URL:
+              "postgres://takos:secret@db.example.test:5432/takos?sslmode=require",
+            BLOB_ENDPOINT: "https://objects.example.test",
+            BLOB_BUCKET: "inst-1",
+            BLOB_ACCESS_KEY: "access-key",
+            BLOB_SECRET_KEY: "secret-key",
+          },
+          bindings: [{
+            name: "auth",
+            kind: "identity.oidc@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/auth/oidc-client/toc_1",
+            secret_refs: [
+              "takosumi-accounts://installations/inst_1/bindings/auth/secrets/client-secret",
+            ],
+          }, {
+            name: "bootstrap",
+            kind: "install-launch-token@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+            secret_refs: [],
+          }, {
+            name: "blob",
+            kind: "object-store.s3-compatible@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/blob/object-store/main",
+            secret_refs: [
+              "takosumi-accounts://installations/inst_1/bindings/blob/secrets/secret-key",
+            ],
+          }, {
+            name: "database",
+            kind: "database.postgres@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/database/postgres/main",
+            secret_refs: [
+              "takosumi-accounts://installations/inst_1/bindings/database/secrets/password",
+            ],
+          }],
+          oidc_client_secret: "client-secret",
+          oidc_client: {
+            client_id: "toc_1",
+            installation_id: "inst_1",
+            namespace_path: "operator.identity.oidc",
+            issuer_url: "https://accounts.example",
+            redirect_uris: ["http://localhost:8787/auth/oidc/callback"],
+          },
+        }, { status: 202 }));
+      },
+    });
+
+    const deployBody = await requests[2].json();
+    const env = deployBody.manifest.resources[0].spec.env;
+    assertEquals(env.OIDC_ISSUER_URL, "https://accounts.example");
+    assertEquals(env.OIDC_CLIENT_ID, "toc_1");
+    assertEquals(env.OIDC_CLIENT_SECRET, "client-secret");
+    assertEquals(
+      env.OIDC_REDIRECT_URI,
+      "http://localhost:8787/auth/oidc/callback",
+    );
+    assertEquals(
+      env.DATABASE_URL,
+      "postgres://takos:secret@db.example.test:5432/takos?sslmode=require",
+    );
+    assertEquals(env.DB_HOST, "db.example.test");
+    assertEquals(env.DB_PASSWORD, "secret");
+    assertEquals(env.BLOB_ENDPOINT, "https://objects.example.test");
+    assertEquals(env.BLOB_SECRET_KEY, "secret-key");
+    assertEquals(env.INSTALL_LAUNCH_PUBLIC_KEY, '{"keys":[]}');
+    assertEquals(
+      env.INSTALL_LAUNCH_CONSUME_PATH,
+      "/v1/installations/inst_1/launch-token/consume",
+    );
+    assertEquals(env.INSTALLATION_ID, "inst_1");
+    assertEquals(env.SPACE_ID, "space_1");
+    assertEquals(env.BASE_URL, "http://localhost:8787");
+    assertEquals(JSON.stringify(deployBody).includes("${bindings."), false);
+    assertEquals(JSON.stringify(deployBody).includes("${secrets."), false);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
