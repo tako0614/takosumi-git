@@ -162,8 +162,8 @@ jobs:
     steps:
       - name: probe-env
         run: |
-          if [ -n "$TAKOS_TOKEN$TAKOSUMI_DEPLOY_TOKEN$OIDC_CLIENT_SECRET$DATABASE_URL" ]; then
-            echo "leaked:$TAKOS_TOKEN:$TAKOSUMI_DEPLOY_TOKEN:$OIDC_CLIENT_SECRET:$DATABASE_URL"
+          if [ -n "$TAKOS_TOKEN$TAKOSUMI_DEPLOY_TOKEN$OIDC_CLIENT_SECRET$DATABASE_URL$AWS_ACCESS_KEY_ID$AWS_SECRET_ACCESS_KEY$GOOGLE_APPLICATION_CREDENTIALS$CLOUDFLARE_API_TOKEN" ]; then
+            echo "leaked:$TAKOS_TOKEN:$TAKOSUMI_DEPLOY_TOKEN:$OIDC_CLIENT_SECRET:$DATABASE_URL:$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY:$GOOGLE_APPLICATION_CREDENTIALS:$CLOUDFLARE_API_TOKEN"
             exit 42
           fi
           echo "isolated"
@@ -1221,7 +1221,7 @@ Deno.test("applyInstall compiles workflowRef before kernel deploy", async () => 
   }
 });
 
-Deno.test("applyInstall default workflow executor does not inherit runtime secrets", async () => {
+Deno.test("applyInstall default workflow executor does not inherit runtime secrets or provider credentials", async () => {
   const checkoutRoot = await Deno.makeTempDir({
     prefix: "takosumi-git-install-sandbox-",
   });
@@ -1230,6 +1230,12 @@ Deno.test("applyInstall default workflow executor does not inherit runtime secre
     TAKOSUMI_DEPLOY_TOKEN: Deno.env.get("TAKOSUMI_DEPLOY_TOKEN"),
     OIDC_CLIENT_SECRET: Deno.env.get("OIDC_CLIENT_SECRET"),
     DATABASE_URL: Deno.env.get("DATABASE_URL"),
+    AWS_ACCESS_KEY_ID: Deno.env.get("AWS_ACCESS_KEY_ID"),
+    AWS_SECRET_ACCESS_KEY: Deno.env.get("AWS_SECRET_ACCESS_KEY"),
+    GOOGLE_APPLICATION_CREDENTIALS: Deno.env.get(
+      "GOOGLE_APPLICATION_CREDENTIALS",
+    ),
+    CLOUDFLARE_API_TOKEN: Deno.env.get("CLOUDFLARE_API_TOKEN"),
   };
   const requests: Request[] = [];
   try {
@@ -1237,6 +1243,10 @@ Deno.test("applyInstall default workflow executor does not inherit runtime secre
     Deno.env.set("TAKOSUMI_DEPLOY_TOKEN", "deploy-token-secret");
     Deno.env.set("OIDC_CLIENT_SECRET", "oidc-client-secret");
     Deno.env.set("DATABASE_URL", "postgres://secret@example/db");
+    Deno.env.set("AWS_ACCESS_KEY_ID", "aws-access-key");
+    Deno.env.set("AWS_SECRET_ACCESS_KEY", "aws-secret-key");
+    Deno.env.set("GOOGLE_APPLICATION_CREDENTIALS", "/tmp/gcp-creds.json");
+    Deno.env.set("CLOUDFLARE_API_TOKEN", "cloudflare-token");
     await Deno.mkdir(join(checkoutRoot, ".takosumi", "workflows"), {
       recursive: true,
     });
