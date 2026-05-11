@@ -56,6 +56,8 @@ Deno.test("parseImportArgs reads import options and aliases", () => {
     "self-hosted",
     "--idempotency-key",
     "idem-import",
+    "--identity",
+    "identity-a.txt,identity-b.txt",
     "--json",
   ]);
 
@@ -68,6 +70,8 @@ Deno.test("parseImportArgs reads import options and aliases", () => {
   assertEquals(parsed.targetInstallationId, "inst_target");
   assertEquals(parsed.mode, "self-hosted");
   assertEquals(parsed.idempotencyKey, "idem-import");
+  assertStringIncludes(parsed.identities?.[0] ?? "", "identity-a.txt");
+  assertStringIncludes(parsed.identities?.[1] ?? "", "identity-b.txt");
   assertEquals(parsed.json, true);
 });
 
@@ -247,6 +251,99 @@ Deno.test("applyImport reads bundle JSON from tar.zst archive", async () => {
   }
 });
 
+Deno.test("applyImport decrypts age-wrapped tar.zst archive with identity", async () => {
+  const root = await Deno.makeTempDir({
+    prefix: "takosumi-git-import-age-",
+  });
+  const requests: Request[] = [];
+  try {
+    const sourceRoot = join(root, "src");
+    await Deno.mkdir(join(sourceRoot, "takos-export"), { recursive: true });
+    await Deno.writeTextFile(
+      join(sourceRoot, "takos-export", "bundle.json"),
+      `${JSON.stringify(EXPORT_BUNDLE, null, 2)}\n`,
+    );
+    const clearPath = join(root, "takos-export.tar.zst");
+    await assertCommandOk(
+      new Deno.Command("tar", {
+        args: [
+          "--use-compress-program=zstd",
+          "-cf",
+          clearPath,
+          "-C",
+          sourceRoot,
+          "takos-export",
+        ],
+      }),
+    );
+    const encryptedPath = join(root, "takos-export.tar.zst.age");
+    await Deno.copyFile(clearPath, encryptedPath);
+    const identityPath = join(root, "identity.txt");
+    await Deno.writeTextFile(identityPath, "AGE-SECRET-KEY-test\n");
+    const ageExecutable = await writeFakeAgeExecutable(root);
+
+    const result = await applyImport({
+      bundlePath: encryptedPath,
+      accountsUrl: "https://accounts.target.test/",
+      accountId: "acct_target",
+      spaceId: "space_target",
+      createdBySubject: "tsub_target",
+      identities: [identityPath],
+      ageExecutable,
+      json: true,
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: {
+            id: "inst_target",
+          },
+          import_plan: {
+            target_issuer: "https://accounts.target.test",
+          },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(result.accounts.installationId, "inst_target");
+    const body = await requests[0].json();
+    assertEquals(
+      body.bundle.kind,
+      "takosumi.accounts.installation-export-bundle@v1",
+    );
+    assertEquals(
+      body.bundle.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("applyImport rejects encrypted export bundle without identity", async () => {
+  const root = await Deno.makeTempDir({
+    prefix: "takosumi-git-import-age-",
+  });
+  try {
+    const bundlePath = join(root, "takos-export.tar.zst.age");
+    await Deno.writeTextFile(bundlePath, "encrypted placeholder\n");
+    await assertRejects(
+      () =>
+        applyImport({
+          bundlePath,
+          accountsUrl: "https://accounts.target.test",
+          accountId: "acct_target",
+          spaceId: "space_target",
+          createdBySubject: "tsub_target",
+          json: true,
+        }),
+      Error,
+      "requires --identity",
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("applyImport rejects unsupported bundle kind", async () => {
   const root = await Deno.makeTempDir({
     prefix: "takosumi-git-import-",
@@ -281,6 +378,38 @@ async function assertCommandOk(command: Deno.Command): Promise<void> {
   if (!output.success) {
     throw new Error(new TextDecoder().decode(output.stderr));
   }
+}
+
+async function writeFakeAgeExecutable(root: string): Promise<string> {
+  const path = join(root, "fake-age.sh");
+  await Deno.writeTextFile(
+    path,
+    `#!/bin/sh
+set -eu
+out=""
+input=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -o)
+      shift
+      out="$1"
+      ;;
+    -r|-i)
+      shift
+      ;;
+    -d)
+      ;;
+    *)
+      input="$1"
+      ;;
+  esac
+  shift
+done
+cp "$input" "$out"
+`,
+  );
+  await Deno.chmod(path, 0o755);
+  return path;
 }
 
 Deno.test("applyImport surfaces Accounts import errors", async () => {

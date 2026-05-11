@@ -86,6 +86,7 @@ IMPORT OPTIONS:
   --auth-issuer <url>          target OIDC issuer
   --installation-id <id>       target installation id
   --mode <mode>                dedicated | self-hosted
+  --identity <path[,path]>     age identity file(s) for .tar.zst.age bundles
   --json                       print JSON
 
 UPGRADE / ROLLBACK OPTIONS:

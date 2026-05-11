@@ -298,8 +298,9 @@ the operation and return the operation tracking URL; provider workers complete
 the runtime move or bundle creation asynchronously. When an export response is
 already completed and includes `downloadUrl`, `takosumi-git export --output`
 downloads that bundle to disk. Import reads a JSON AppInstallation export
-bundle, or a `tar.zst` archive containing `takos-export/bundle.json`, and
-creates the target AppInstallation through Accounts.
+bundle, a `tar.zst` archive containing `takos-export/bundle.json`, or an
+age-wrapped `tar.zst.age` archive when `--identity` is supplied, and creates the
+target AppInstallation through Accounts.
 
 ```bash
 takosumi-git materialize inst_01J... \
@@ -315,14 +316,15 @@ takosumi-git export inst_01J... \
   --include-data \
   --encryption-method age \
   --recipient age1... \
-  --output ./takos-export.tar.zst
+  --output ./takos-export.tar.zst.age
 
-takosumi-git import ./takos-export.tar.zst \
+takosumi-git import ./takos-export.tar.zst.age \
   --to http://127.0.0.1:8787 \
   --account-id acct_self_host \
   --space-id space_self_host \
   --subject tsub_owner \
-  --auth-issuer https://accounts.self-host.example
+  --auth-issuer https://accounts.self-host.example \
+  --identity ./age-identity.txt
 ```
 
 `--auth-issuer` は import 先 Takosumi Accounts issuer を指します。Keycloak /
@@ -341,4 +343,5 @@ Materialize and export send an `Idempotency-Key` header. Pass
 `--idempotency-key` to reuse a known key across retries. Import accepts the same
 header for future-compatible retries. Archive import reads the canonical
 `takosumi.accounts.installation-export-bundle@v1` payload from
-`takos-export/bundle.json` inside the `tar.zst`.
+`takos-export/bundle.json` inside the `tar.zst`; `.tar.zst.age` inputs are
+decrypted with `age -d -i <identity>` before the same archive read.

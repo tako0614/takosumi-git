@@ -19,6 +19,7 @@ export interface ParsedImportArgs {
   readonly targetInstallationId?: string;
   readonly mode?: InstallImportMode;
   readonly idempotencyKey?: string;
+  readonly identities?: readonly string[];
   readonly json: boolean;
 }
 
@@ -63,6 +64,7 @@ export function parseImportArgs(
       "installation-id",
       "mode",
       "idempotency-key",
+      "identity",
     ],
     boolean: ["json"],
     default: {
@@ -92,6 +94,7 @@ export function parseImportArgs(
   const mode = flags.mode === undefined
     ? undefined
     : parseImportMode(flags.mode);
+  const identities = parseIdentityPaths(flags.identity);
   if (!accountsUrl) {
     throw new Error("missing --to/--accounts-url (or TAKOSUMI_ACCOUNTS_URL)");
   }
@@ -117,14 +120,21 @@ export function parseImportArgs(
     ...(flags["idempotency-key"]
       ? { idempotencyKey: String(flags["idempotency-key"]) }
       : {}),
+    ...(identities.length > 0 ? { identities } : {}),
     json: Boolean(flags.json),
   };
 }
 
 export async function applyImport(
-  options: ParsedImportArgs & { readonly fetch?: typeof fetch },
+  options: ParsedImportArgs & {
+    readonly fetch?: typeof fetch;
+    readonly ageExecutable?: string;
+  },
 ): Promise<ImportApplyResult> {
-  const bundle = await readExportBundleJson(options.bundlePath);
+  const bundle = await readExportBundleJson(options.bundlePath, {
+    identities: options.identities ?? [],
+    ageExecutable: options.ageExecutable,
+  });
   const request = {
     bundle,
     targetAccountId: options.accountId,
@@ -238,6 +248,7 @@ OPTIONS:
   --target-installation-id <id> alias for --installation-id
   --mode <mode>                 dedicated | self-hosted
   --idempotency-key <key>       idempotency key for future-compatible retries
+  --identity <path[,path]>      age identity file(s) for .tar.zst.age bundles
   --json                        print JSON
 `;
 
@@ -251,13 +262,67 @@ function parseImportMode(value: unknown): InstallImportMode {
   throw new Error(`--mode must be one of ${INSTALL_IMPORT_MODES.join("|")}`);
 }
 
+function parseIdentityPaths(value: unknown): readonly string[] {
+  if (value === undefined) return [];
+  const raw = Array.isArray(value) ? value.join(",") : String(value);
+  return raw.split(",").map((entry) => entry.trim()).filter(Boolean).map((
+    entry,
+  ) => resolve(entry));
+}
+
 async function readExportBundleJson(
   path: string,
+  options: {
+    readonly identities?: readonly string[];
+    readonly ageExecutable?: string;
+  } = {},
 ): Promise<Record<string, unknown>> {
+  if (path.endsWith(".age")) {
+    return parseExportBundleJsonText(
+      await readAgeEncryptedTarZstBundleJson(path, options),
+    );
+  }
   if (path.endsWith(".tar.zst")) {
     return parseExportBundleJsonText(await readTarZstBundleJson(path));
   }
   return parseExportBundleJsonText(await Deno.readTextFile(path));
+}
+
+async function readAgeEncryptedTarZstBundleJson(
+  path: string,
+  options: {
+    readonly identities?: readonly string[];
+    readonly ageExecutable?: string;
+  },
+): Promise<string> {
+  const identities = options.identities ?? [];
+  if (identities.length === 0) {
+    throw new Error("encrypted export bundle import requires --identity");
+  }
+  const clearPath = await Deno.makeTempFile({
+    prefix: "takosumi-git-import-",
+    suffix: ".tar.zst",
+  });
+  try {
+    const output = await new Deno.Command(options.ageExecutable ?? "age", {
+      args: [
+        "-d",
+        ...identities.flatMap((identity) => ["-i", identity]),
+        "-o",
+        clearPath,
+        path,
+      ],
+    }).output();
+    if (!output.success) {
+      const stderr = new TextDecoder().decode(output.stderr).trim();
+      throw new Error(
+        `failed to decrypt export bundle${stderr ? `: ${stderr}` : ""}`,
+      );
+    }
+    return await readTarZstBundleJson(clearPath);
+  } finally {
+    await Deno.remove(clearPath).catch(() => {});
+  }
 }
 
 async function readTarZstBundleJson(path: string): Promise<string> {
