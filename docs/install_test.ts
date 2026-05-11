@@ -54,6 +54,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "Preview is non-mutating",
       "Compiled manifests must not carry installer-only placeholders",
       "${bindings.*}",
+      "${refs.*}",
+      "${refs.<binding>.configRef}",
       "removed `${imports.*}`",
       "takosumi-git upgrade inst_01J",
       "takosumi-git rollback inst_01J",

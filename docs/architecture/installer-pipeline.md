@@ -205,10 +205,11 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 
 - compiled manifest への binding 値反映は **installer / account plane 内部**で
   行い、workflow からは触れない。
-- current `takosumi-git` は unresolved `${bindings.*}` / `${secrets.*}` /
-  `${params.*}` / `${installation.*}` / `${artifacts.*}` / legacy `${refs.*}` を
-  kernel に渡さず、Accounts materialization 後の deploy request build
-  時点で失敗させる。
+- current `takosumi-git` は Accounts materialization 後に `${bindings.*}` /
+  `${secrets.*}` / `${refs.*}` / `${installation.*}` を解決する。未解決の
+  `${params.*}` / `${installation.*}` / `${artifacts.*}` / `${bindings.*}` /
+  `${secrets.*}` / `${refs.*}` や removed `${imports.*}` は kernel に渡さず、
+  deploy request build 時点で失敗させる。
 - kernel は manifest 内の installer-only placeholder を受け付けない。残り得る
   placeholder は `${ref:...}` / `${secret-ref:...}` の kernel-resolved
   references だけ。`${imports.*}` は removed placeholder なので残らない。
