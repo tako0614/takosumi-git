@@ -227,6 +227,63 @@ Deno.test("push --dry-run resolves workflowRef into spec.image and strips workfl
   }
 });
 
+Deno.test("push rejects workflowRef files outside the workflows directory", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      metadata: { name: "demo" },
+      resources: [
+        {
+          shape: "web-service@v1",
+          name: "web",
+          provider: "@takos/cloudflare-container",
+          spec: { image: "PLACEHOLDER", port: 8080 },
+          workflowRef: {
+            file: "../outside.yml",
+            job: "build-image",
+            artifact: "image",
+          },
+        },
+      ],
+    },
+    workflows: {},
+  });
+  try {
+    await Deno.writeTextFile(
+      join(project.root, ".takosumi", "outside.yml"),
+      stringifyYaml({
+        version: "0",
+        jobs: [
+          {
+            name: "build-image",
+            steps: [{ name: "compile", run: "true" }],
+            artifact: { name: "image" },
+          },
+        ],
+      }),
+    );
+
+    await assertRejects(
+      () =>
+        push({
+          endpoint: "http://nope",
+          token: "x",
+          manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+          workflowsDir: join(project.root, ".takosumi", "workflows"),
+          mode: "apply",
+          dryRun: true,
+          executorFactory: () => fakeOk,
+          git: fakeGit,
+        }),
+      Error,
+      "resources[0].workflowRef.file must be a relative path inside workflows directory",
+    );
+  } finally {
+    await project.cleanup();
+  }
+});
+
 Deno.test("default workflow executor does not inherit runtime secrets", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-sandbox-" });
   const previous = {

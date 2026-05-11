@@ -195,6 +195,8 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 
 - runtime secrets は **一切渡さない** (`OIDC_CLIENT_SECRET` / database password
   / object store key など)。
+- `workflowRef.file` は `.takosumi/workflows` 内の relative path に限定し、
+  `../` escape / absolute path / symlink escape は workflow 実行前に拒否する。
 - untrusted Git repo には operator 側の container / VM runner で network egress
   allowlist を適用する。current default local executor は build process の env
   を clear するが、OS-level network namespace は作らない。

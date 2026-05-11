@@ -27,6 +27,7 @@ import {
   type StepExecutor,
   type StepOutcome,
 } from "@takos/takosumi-git-workflow-runner";
+import { resolveWorkflowFilePath } from "./workflow_path.ts";
 
 export const INSTALLABLE_APP_API_VERSION = "app.takosumi.dev/v1";
 export const INSTALLABLE_APP_KIND = "InstallableApp";
@@ -1353,7 +1354,11 @@ async function compileInstallWorkflowRefs(input: {
     ((projectRoot: string) => defaultInstallStepExecutor(projectRoot));
 
   for (const entry of entries) {
-    const workflowPath = join(input.workflowsDir, entry.workflowRef.file);
+    const workflowPath = await resolveWorkflowFilePath(
+      input.workflowsDir,
+      entry.workflowRef.file,
+      `resources[${entry.index}].workflowRef.file`,
+    );
     const workflow = parseYaml(await Deno.readTextFile(workflowPath));
     if (
       !isRecord(workflow) ||

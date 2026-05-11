@@ -16,6 +16,7 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
       "final non-empty stdout line",
       "[stderr]",
       "cleared process",
+      "path inside `.takosumi/workflows`",
       "TAKOS_TOKEN",
       "OIDC_CLIENT_SECRET",
       "DATABASE_URL",
@@ -37,6 +38,7 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
       "ARTIFACT_MARKER_PREFIX",
       "clearEnv: true",
       "WORKFLOW_ENV_ALLOWLIST",
+      "resolveWorkflowFilePath",
       "validateResolvedArtifactTarget",
       "spec.image artifacts must be digest-pinned",
       "artifactContractResolver",
@@ -84,6 +86,7 @@ Deno.test("quickstart and workflow-ref docs pin the project convention", async (
       "POST /v1/deployments",
       ".takosumi/manifest.yml",
       "Artifact URI Contract",
+      "inside `.takosumi/workflows`",
     ]
   ) {
     assert.ok(quickstart.includes(snippet), `quickstart missing ${snippet}`);

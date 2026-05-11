@@ -45,7 +45,9 @@ resources:
 
 1. `takosumi-git push` reads `.takosumi/manifest.yml`.
 2. It finds every `resources[i].workflowRef`.
-3. It loads `workflowRef.file` from the workflows directory.
+3. It loads `workflowRef.file` from the workflows directory. The file value must
+   be a relative path inside `.takosumi/workflows`; absolute paths, `../`
+   escape, and symlink escape are rejected before execution.
 4. It runs `workflowRef.job`.
 5. It resolves the job artifact URI according to
    [Artifact URI Contract](./artifact-contract.md).

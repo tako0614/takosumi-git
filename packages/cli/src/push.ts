@@ -56,6 +56,7 @@ import {
   compileInstallManifest,
   parseInstallableAppYaml,
 } from "./install.ts";
+import { resolveWorkflowFilePath } from "./workflow_path.ts";
 
 export interface PushOptions {
   readonly endpoint: string;
@@ -448,7 +449,11 @@ export async function push(options: PushOptions): Promise<PushResult> {
   const resourceProvenance: DeploymentResourceArtifactProvenance[] = [];
 
   for (const entry of entries) {
-    const workflowPath = join(workflowsDir, entry.workflowRef.file);
+    const workflowPath = await resolveWorkflowFilePath(
+      workflowsDir,
+      entry.workflowRef.file,
+      `resources[${entry.index}].workflowRef.file`,
+    );
     const workflow = await readYaml<WorkflowFile>(workflowPath);
     if (
       !isRecord(workflow) ||

@@ -1560,6 +1560,66 @@ Deno.test("applyInstall compiles workflowRef before kernel deploy", async () => 
   }
 });
 
+Deno.test("applyInstall rejects workflowRef files outside the workflows directory", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-install-workflow-",
+  });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi", "workflows"), {
+      recursive: true,
+    });
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      WORKFLOW_APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      WORKFLOW_MANIFEST_YML.replace("file: build.yml", "file: ../outside.yml"),
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "outside.yml"),
+      WORKFLOW_FILE_YML,
+    );
+
+    await assertRejects(
+      () =>
+        applyInstall({
+          subcommand: "apply",
+          cwd: "/unused",
+          appPath: "/unused/.takosumi/app.yml",
+          appPathSpec: ".takosumi/app.yml",
+          manifestPathSpec: ".takosumi/manifest.yml",
+          json: true,
+          sourceGitUrl: "https://github.com/example/workflow",
+          sourceRef: "v1.2.3",
+          accountsUrl: "http://accounts.example",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          createdBySubject: "tsub_owner",
+          costAck: true,
+          endpoint: "http://kernel.example",
+          deployToken: "deploy-secret",
+          checkoutSource: () =>
+            Promise.resolve({
+              root: checkoutRoot,
+              commit: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+              cleanup: () => Promise.resolve(),
+            }),
+          fetch: (input, init) => {
+            requests.push(new Request(input, init));
+            return Promise.resolve(Response.json({}));
+          },
+        }),
+      Error,
+      "resources[0].workflowRef.file must be a relative path inside workflows directory",
+    );
+    assertEquals(requests.length, 0);
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
 Deno.test("applyInstall default workflow executor does not inherit runtime secrets or provider credentials", async () => {
   const checkoutRoot = await Deno.makeTempDir({
     prefix: "takosumi-git-install-sandbox-",

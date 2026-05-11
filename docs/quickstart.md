@@ -61,7 +61,9 @@ resources:
       artifact: image
 ```
 
-See [WorkflowRef](./workflow-ref.md) for the field contract.
+See [WorkflowRef](./workflow-ref.md) for the field contract. The workflow file
+path must stay inside `.takosumi/workflows`; `../` and absolute path escape are
+rejected.
 
 ## 4. Make the Workflow Print an Artifact URI Marker
 

@@ -265,6 +265,9 @@ non-secret allowlist. Operator runtime secrets such as `TAKOS_TOKEN`,
 `TAKOSUMI_DEPLOY_TOKEN`, `OIDC_CLIENT_SECRET`, and `DATABASE_URL` are not
 inherited by build steps. The installer uses the same build environment contract
 documented in [Artifact URI Contract](./artifact-contract.md).
+`workflowRef.file` must resolve to a relative path inside `.takosumi/workflows`;
+absolute paths, `../` escape, and symlink escape are rejected before any
+workflow step runs.
 
 ## Installer Placeholders
 

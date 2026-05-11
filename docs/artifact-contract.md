@@ -90,7 +90,9 @@ temporary directories (`PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `USER`,
 tokens such as `TAKOS_TOKEN`, `TAKOSUMI_TOKEN`, `OIDC_CLIENT_SECRET`, or
 `DATABASE_URL` are not inherited by workflow steps. Build workflows must receive
 publish credentials through a future explicit build-secret mechanism, not
-through the operator process environment.
+through the operator process environment. `workflowRef.file` must be a relative
+path inside `.takosumi/workflows`; paths that escape the workflows directory,
+including symlink escapes, are rejected before execution.
 
 ## Failure Modes
 
