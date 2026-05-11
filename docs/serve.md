@@ -18,14 +18,14 @@ takosumi-git serve \
 
 The server listens on `0.0.0.0:8788` by default and exposes:
 
-| method | path                  | provider / purpose      |
-| ------ | --------------------- | ----------------------- |
-| POST   | `/webhooks/github`    | GitHub push webhook     |
-| POST   | `/webhooks/gitlab`    | GitLab push webhook     |
-| POST   | `/webhooks/gitea`     | Gitea push webhook      |
-| POST   | `/v1/install/preview` | non-mutating app review |
-| POST   | `/v1/install/apply`   | mutating app install    |
-| GET    | `/health`             | health                  |
+| method | path                  | provider / purpose                    |
+| ------ | --------------------- | ------------------------------------- |
+| POST   | `/webhooks/github`    | GitHub push webhook                   |
+| POST   | `/webhooks/gitlab`    | GitLab push webhook                   |
+| POST   | `/webhooks/gitea`     | Gitea push webhook                    |
+| POST   | `/v1/install/preview` | non-mutating app review               |
+| POST   | `/v1/install/apply`   | Accounts-backed install orchestration |
+| GET    | `/health`             | health                                |
 
 ## Signature Verification
 
@@ -65,9 +65,8 @@ takosumi-git serve \
 
 Install webhook mode reads local `.takosumi/app.yml`, uses the webhook commit as
 the `source.commit` pin when it is a full 40-character SHA, runs
-`install
-apply`, optionally deploys to the configured kernel endpoint, and
-patches the AppInstallation status.
+`install apply`, optionally deploys to the configured kernel endpoint, and calls
+Takosumi Accounts to create or transition the AppInstallation record.
 
 ## Install API
 
@@ -75,10 +74,10 @@ patches the AppInstallation status.
 [Install Preview and Apply](./install.md). It is non-mutating and does not need
 a bearer token.
 
-`POST /v1/install/apply` runs the existing `install apply` pipeline from a Git
-source: checkout, preview/compile, AppInstallation creation, optional kernel
-deploy, and status patch. Because it mutates Accounts and the kernel, callers
-must send:
+`POST /v1/install/apply` runs the existing `install apply` orchestration from a
+Git source: checkout, preview/compile, Accounts install API call, optional
+kernel deploy, and Accounts status transition. Because it asks Accounts and the
+kernel to mutate state, callers must send:
 
 ```text
 Authorization: Bearer <serve-token>

@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertThrows } from "@std/assert";
 import { join } from "@std/path";
 import {
   createServeHandler,
@@ -507,9 +507,6 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
         TAKOSUMI_SUBJECT: "tsub_owner",
         TAKOSUMI_RUNTIME_BASE_URL: "https://app.example",
         TAKOSUMI_DEPLOY_TOKEN: "deploy-token",
-        TAKOSUMI_SERVICE_RESOLVER_URL:
-          "https://anchor.example.test/v1/services",
-        TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY: "pubkey",
       };
       return env[key];
     },
@@ -528,9 +525,25 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
   assertEquals(parsed.subject, "tsub_owner");
   assertEquals(parsed.runtimeBaseUrl, "https://app.example");
   assertEquals(parsed.deployToken, "deploy-token");
-  assertEquals(parsed.serviceResolvers, [{
-    kind: "anchor",
-    url: "https://anchor.example.test/v1/services",
-    publicKey: "pubkey",
-  }]);
+});
+
+Deno.test("parseServeArgs rejects removed service resolver flags", () => {
+  assertThrows(
+    () =>
+      parseServeArgs([
+        "--service-resolver-url",
+        "https://anchor.example.test/v1/services",
+      ], {
+        get(key: string) {
+          const env: Record<string, string> = {
+            TAKOSUMI_ENDPOINT: "https://kernel.example",
+            TAKOSUMI_TOKEN: "token",
+            TAKOSUMI_GIT_WEBHOOK_SECRET: "secret",
+          };
+          return env[key];
+        },
+      }),
+    Error,
+    "service resolver options were removed",
+  );
 });

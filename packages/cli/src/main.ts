@@ -53,9 +53,6 @@ PUSH OPTIONS:
   --mode <apply|plan|destroy>  deploy mode (default apply)
   --artifact-contract <v0|v1|auto>
                                artifact URI resolver (default v1)
-  --service-resolver-url <url> service descriptor anchor URL
-  --service-resolver-public-key <key>
-                               Ed25519 public key for the anchor
   --dry-run                    run workflows but skip POST; print resolved manifest
 
 INSTALL OPTIONS:
@@ -76,9 +73,6 @@ INSTALL OPTIONS:
   --runtime-base-url <url>     app runtime base URL for OIDC redirects
   --endpoint <url>             takosumi kernel endpoint for deploy
   --deploy-token <token>       kernel deploy token
-  --service-resolver-url <url> service descriptor anchor URL
-  --service-resolver-public-key <key>
-                               Ed25519 public key for the anchor
   --json                       print preview JSON
 
 IMPORT OPTIONS:
@@ -130,9 +124,6 @@ SERVE OPTIONS:
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
   --artifact-contract <v0|v1|auto>
                                artifact URI resolver for dispatched push
-  --service-resolver-url <url> service descriptor anchor URL
-  --service-resolver-public-key <key>
-                               Ed25519 public key for the anchor
   --rate-limit <n>             max requests per rate window (default 60)
   --rate-limit-window-ms <n>   rate window milliseconds (default 60000)
 

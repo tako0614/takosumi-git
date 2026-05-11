@@ -18,6 +18,9 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "takosumi-git install preview",
       "takosumi-git install preview https://github.com/example/hello --ref v1.2.3",
       "takosumi-git.install-preview@v1",
+      "previewId",
+      "expiresAt",
+      "approvalRequired",
       "POST /v1/install/preview",
       "POST /v1/install/apply",
       "takosumi-git.install-apply@v1",
@@ -36,22 +39,22 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "--endpoint",
       "--deploy-token",
       "takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>",
-      "serviceImports[]",
-      "--service-resolver-url",
-      "TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY",
+      "Namespace Exports",
+      "operator.identity.oidc",
+      "operator.billing.default",
       "resources[i].workflowRef",
       "TAKOSUMI_ARTIFACT=<uri>",
       "digest-pinned as `<image>@sha256:<64-hex>`",
       "cleared process environment",
       "TAKOSUMI_DEPLOY_TOKEN",
       "Artifact URI Contract",
-      "A kernel HTTP 4xx/5xx response makes the CLI exit",
+      "A kernel HTTP 4xx/5xx response makes the",
       "non-zero",
       "kernel deploy HTTP 200",
       "Preview is non-mutating",
       "Compiled manifests must not carry installer-only placeholders",
       "${bindings.*}",
-      "${imports.account-auth.endpoints.oidc-issuer.url}",
+      "removed `${imports.*}`",
       "takosumi-git upgrade inst_01J",
       "takosumi-git rollback inst_01J",
       "POST /v1/installations/{installation-id}/upgrade",
@@ -70,6 +73,20 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   }
 
   for (
+    const forbidden of [
+      "serviceImports[] is installer-facing",
+      "--service-resolver-url",
+      "TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY",
+      "${imports.account-auth.endpoints.oidc-issuer.url}",
+    ]
+  ) {
+    assert.ok(
+      !doc.includes(forbidden),
+      `install doc still contains ${forbidden}`,
+    );
+  }
+
+  for (
     const snippet of [
       "parseInstallableAppYaml",
       "buildInstallPreview",
@@ -77,7 +94,6 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "appBindingCreateRequests",
       "compileInstallManifest",
       "compileInstallWorkflowRefs",
-      "buildKernelServiceImports",
       "assertNoInstallerPlaceholders",
       "unresolved installer placeholder",
       "checkoutGitSource",
@@ -92,6 +108,13 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
     assert.ok(
       installSource.includes(snippet),
       `install source missing ${snippet}`,
+    );
+  }
+
+  for (const removedSource of ["buildKernelServiceImports"]) {
+    assert.ok(
+      !installSource.includes(removedSource),
+      `install source still contains ${removedSource}`,
     );
   }
 

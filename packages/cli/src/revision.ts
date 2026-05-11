@@ -37,7 +37,6 @@ interface AccountsInstallationEnvelope {
     };
     readonly app_manifest_digest?: string | null;
     readonly compiled_manifest_digest?: string | null;
-    readonly service_imports?: readonly unknown[];
     readonly status: string;
   };
   readonly bindings?: readonly {
@@ -70,7 +69,6 @@ export interface RevisionPreview {
       readonly appManifestDigest?: string;
       readonly compiledManifestDigest?: string;
     };
-    readonly serviceImports: InstallPreview["serviceImports"];
   };
   readonly diff: {
     readonly manifest: {
@@ -364,7 +362,6 @@ function buildRevisionPreview(input: {
           ? { compiledManifestDigest: input.next.source.compiledManifestDigest }
           : {}),
       },
-      serviceImports: input.next.serviceImports,
     },
     diff: {
       manifest: {
@@ -394,7 +391,6 @@ function buildRevisionRequest(input: {
       appManifestDigest: input.preview.next.source.appManifestDigest,
       compiledManifestDigest: input.preview.next.source.compiledManifestDigest,
     },
-    serviceImports: input.preview.next.serviceImports,
     bindings: input.preview.diff.bindings.added.map((entry) => {
       const [name, kind] = entry.split(":");
       return {

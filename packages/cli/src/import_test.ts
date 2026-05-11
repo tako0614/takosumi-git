@@ -21,12 +21,11 @@ const EXPORT_BUNDLE = {
     appManifestDigest: "sha256:app",
     compiledManifestDigest: "sha256:compiled",
   },
-  serviceImports: [],
   runtimeBinding: null,
   oidcClient: {
     clientId: "toc_source",
     binding: "auth",
-    serviceId: "takosumi.account.auth@v1",
+    namespacePath: "operator.identity.oidc",
     issuerUrl: "https://accounts.source.test",
     redirectUris: ["https://hello.example/auth/callback"],
     allowedScopes: ["openid", "profile"],

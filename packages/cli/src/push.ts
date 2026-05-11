@@ -51,8 +51,8 @@ import {
   type StepOutcome,
 } from "@takos/takosumi-git-workflow-runner";
 import {
+  assertNoForbiddenKernelManifestFields,
   compileInstallManifest,
-  type KernelManifestServiceImport,
   parseInstallableAppYaml,
 } from "./install.ts";
 
@@ -64,7 +64,6 @@ export interface PushOptions {
   readonly mode: DeployMode;
   readonly dryRun: boolean;
   readonly artifactContract?: ArtifactContract;
-  readonly serviceResolvers?: readonly ServiceResolverConfig[];
   readonly event?: WorkflowEvent;
   /** Injected for tests. Defaults to global `fetch`. */
   readonly fetch?: typeof fetch;
@@ -80,19 +79,12 @@ export interface PushOptions {
   readonly stdout?: (text: string) => void;
 }
 
-export interface ServiceResolverConfig {
-  readonly kind: "anchor";
-  readonly url: string;
-  readonly publicKey: string;
-}
-
 export interface PushResult {
   readonly manifest: Record<string, unknown>;
   readonly resolved: ReadonlyArray<{
     readonly resource: string;
     readonly artifact: ResolvedArtifact;
   }>;
-  readonly serviceImports: ReadonlyArray<KernelManifestServiceImport>;
   readonly provenance?: DeploymentProvenance;
   readonly response?: { status: number; body: unknown };
 }
@@ -437,12 +429,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
     ? compileInstallManifest(parseInstallableAppYaml(appText), manifestText)
     : undefined;
   if (compiled) manifest = compiled.manifest;
-  const serviceImports = readKernelManifestServiceImports(manifest);
-  applyServiceResolvers({
-    manifest,
-    serviceImportCount: serviceImports.length,
-    serviceResolvers: options.serviceResolvers ?? [],
-  });
+  assertNoForbiddenKernelManifestFields(manifest);
   const entries = extractResourceEntries(manifest);
   const executorFactory = options.executorFactory ??
     ((_dir: string) => defaultStepExecutor(projectRoot));
@@ -577,7 +564,6 @@ export async function push(options: PushOptions): Promise<PushResult> {
     return {
       manifest,
       resolved,
-      serviceImports,
       ...(provenance ? { provenance } : {}),
     };
   }
@@ -598,60 +584,9 @@ export async function push(options: PushOptions): Promise<PushResult> {
   return {
     manifest,
     resolved,
-    serviceImports,
     ...(provenance ? { provenance } : {}),
     response,
   };
-}
-
-function readKernelManifestServiceImports(
-  manifest: Record<string, unknown>,
-): readonly KernelManifestServiceImport[] {
-  const imports = manifest.imports;
-  if (imports === undefined) return [];
-  if (!Array.isArray(imports)) {
-    throw new Error("manifest.imports must be an array");
-  }
-  return imports.map((entry, index) => {
-    if (!isRecord(entry)) {
-      throw new Error(`manifest.imports[${index}] must be an object`);
-    }
-    if (typeof entry.alias !== "string" || typeof entry.service !== "string") {
-      throw new Error(
-        `manifest.imports[${index}] must declare alias and service`,
-      );
-    }
-    return {
-      alias: entry.alias,
-      service: entry.service,
-      ...(entry.refreshPolicy !== undefined
-        ? { refreshPolicy: entry.refreshPolicy as Record<string, unknown> }
-        : {}),
-    };
-  });
-}
-
-function applyServiceResolvers(input: {
-  manifest: Record<string, unknown>;
-  serviceImportCount: number;
-  serviceResolvers: readonly ServiceResolverConfig[];
-}): void {
-  if (input.serviceImportCount === 0) return;
-  const existing = input.manifest.serviceResolvers;
-  if (existing !== undefined && !Array.isArray(existing)) {
-    throw new Error("manifest.serviceResolvers must be an array");
-  }
-  if (Array.isArray(existing) && existing.length > 0) return;
-  if (input.serviceResolvers.length === 0) {
-    throw new Error(
-      "service imports require serviceResolvers; pass --service-resolver-url and --service-resolver-public-key",
-    );
-  }
-  input.manifest.serviceResolvers = input.serviceResolvers.map((resolver) => ({
-    kind: resolver.kind,
-    url: resolver.url,
-    publicKey: resolver.publicKey,
-  }));
 }
 
 async function defaultGitRunner(
@@ -788,7 +723,6 @@ export interface ParsedPushArgs {
   readonly mode: DeployMode;
   readonly dryRun: boolean;
   readonly artifactContract: ArtifactContract;
-  readonly serviceResolvers?: readonly ServiceResolverConfig[];
 }
 
 export function parseArtifactContract(raw: unknown): ArtifactContract {
@@ -802,6 +736,7 @@ export function parsePushArgs(
   args: readonly string[],
   env: { get(key: string): string | undefined } = Deno.env,
 ): ParsedPushArgs {
+  rejectRemovedServiceResolverOptions(args);
   const flags = parseArgs(args as string[], {
     string: [
       "endpoint",
@@ -810,8 +745,6 @@ export function parsePushArgs(
       "workflows-dir",
       "mode",
       "artifact-contract",
-      "service-resolver-url",
-      "service-resolver-public-key",
     ],
     boolean: ["dry-run"],
     alias: {},
@@ -828,19 +761,6 @@ export function parsePushArgs(
   const token = (flags.token as string | undefined) ??
     env.get("TAKOSUMI_TOKEN") ?? "";
   const dryRun = Boolean(flags["dry-run"]);
-  const serviceResolverUrl = (flags["service-resolver-url"] as
-    | string
-    | undefined) ??
-    env.get("TAKOSUMI_SERVICE_RESOLVER_URL");
-  const serviceResolverPublicKey = (flags["service-resolver-public-key"] as
-    | string
-    | undefined) ??
-    env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
-  if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
-    throw new Error(
-      "--service-resolver-url and --service-resolver-public-key must be provided together",
-    );
-  }
   if (!dryRun && !endpoint) {
     throw new Error(
       "missing --endpoint (or TAKOSUMI_ENDPOINT); required unless --dry-run",
@@ -865,16 +785,22 @@ export function parsePushArgs(
     mode,
     dryRun,
     artifactContract: parseArtifactContract(flags["artifact-contract"]),
-    ...(serviceResolverUrl && serviceResolverPublicKey
-      ? {
-        serviceResolvers: [{
-          kind: "anchor" as const,
-          url: serviceResolverUrl,
-          publicKey: serviceResolverPublicKey,
-        }],
-      }
-      : {}),
   };
+}
+
+function rejectRemovedServiceResolverOptions(args: readonly string[]): void {
+  if (
+    args.some((arg) =>
+      arg === "--service-resolver-url" ||
+      arg.startsWith("--service-resolver-url=") ||
+      arg === "--service-resolver-public-key" ||
+      arg.startsWith("--service-resolver-public-key=")
+    )
+  ) {
+    throw new Error(
+      "service resolver options were removed; manifests must not declare service imports or serviceResolvers",
+    );
+  }
 }
 
 export async function runPushCli(args: readonly string[]): Promise<number> {

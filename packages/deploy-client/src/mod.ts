@@ -21,23 +21,6 @@ export interface ManifestEnvelope {
     readonly template: string;
     readonly inputs?: Record<string, unknown>;
   };
-  readonly services?: ReadonlyArray<{
-    readonly id: string;
-    readonly version: string;
-    readonly contract: string;
-    readonly endpoints: readonly Record<string, unknown>[];
-    readonly metadata?: Record<string, unknown>;
-  }>;
-  readonly imports?: ReadonlyArray<{
-    readonly alias: string;
-    readonly service: string;
-    readonly refreshPolicy?: Record<string, unknown>;
-  }>;
-  readonly serviceResolvers?: ReadonlyArray<{
-    readonly kind: "anchor";
-    readonly url: string;
-    readonly publicKey: string;
-  }>;
   readonly resources?: ReadonlyArray<{
     readonly shape: string;
     readonly name: string;

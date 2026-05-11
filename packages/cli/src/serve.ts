@@ -9,12 +9,7 @@ import { parseArgs } from "@std/cli/parse-args";
 import { dirname, isAbsolute, join } from "@std/path";
 import type { WorkflowEvent } from "@takos/takosumi-git-workflow-contract";
 import { eventFromGitPush } from "@takos/takosumi-git-source";
-import {
-  type ArtifactContract,
-  parseArtifactContract,
-  push,
-  type ServiceResolverConfig,
-} from "./push.ts";
+import { type ArtifactContract, parseArtifactContract, push } from "./push.ts";
 import {
   applyInstall,
   buildInstallPreview,
@@ -42,7 +37,6 @@ export interface ServeOptions {
   readonly workflowsDir: string;
   readonly webhookSecret: string;
   readonly artifactContract: ArtifactContract;
-  readonly serviceResolvers?: readonly ServiceResolverConfig[];
   readonly accountsUrl?: string;
   readonly accountsToken?: string;
   readonly accountId?: string;
@@ -520,7 +514,6 @@ async function handleInstallApplyRequest(
       ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
       endpoint: options.endpoint,
       deployToken: options.deployToken ?? options.token,
-      serviceResolvers: options.serviceResolvers,
       ...(options.installPreviewCheckoutSource
         ? { checkoutSource: options.installPreviewCheckoutSource }
         : {}),
@@ -635,7 +628,6 @@ function defaultDispatch(options: ServeOptions): WebhookDispatch {
       mode: "apply",
       dryRun: false,
       artifactContract: options.artifactContract,
-      serviceResolvers: options.serviceResolvers,
       event: job.event,
     });
   };
@@ -674,7 +666,6 @@ async function dispatchInstallWebhook(
       : {}),
     endpoint: options.endpoint,
     deployToken: options.deployToken ?? options.token,
-    serviceResolvers: options.serviceResolvers,
     ...(options.installApplyFetch ? { fetch: options.installApplyFetch } : {}),
   });
 }
@@ -703,6 +694,7 @@ export function parseServeArgs(
   args: readonly string[],
   env: { get(key: string): string | undefined } = Deno.env,
 ): ParsedServeArgs {
+  rejectRemovedServiceResolverOptions(args);
   const flags = parseArgs(args as string[], {
     string: [
       "host",
@@ -714,8 +706,6 @@ export function parseServeArgs(
       "webhook-secret",
       "webhook-mode",
       "artifact-contract",
-      "service-resolver-url",
-      "service-resolver-public-key",
       "accounts-url",
       "accounts-token",
       "account-id",
@@ -747,14 +737,6 @@ export function parseServeArgs(
     (flags["webhook-mode"] as string | undefined) ??
       env.get("TAKOSUMI_GIT_WEBHOOK_MODE") ?? "push",
   );
-  const serviceResolverUrl = (flags["service-resolver-url"] as
-    | string
-    | undefined) ??
-    env.get("TAKOSUMI_SERVICE_RESOLVER_URL");
-  const serviceResolverPublicKey = (flags["service-resolver-public-key"] as
-    | string
-    | undefined) ??
-    env.get("TAKOSUMI_SERVICE_RESOLVER_PUBLIC_KEY");
   const accountsUrl = (flags["accounts-url"] as string | undefined) ??
     env.get("TAKOSUMI_ACCOUNTS_URL");
   const accountsToken = (flags["accounts-token"] as string | undefined) ??
@@ -771,11 +753,6 @@ export function parseServeArgs(
   );
   const deployToken = (flags["deploy-token"] as string | undefined) ??
     env.get("TAKOSUMI_DEPLOY_TOKEN") ?? env.get("TAKOSUMI_TOKEN");
-  if (Boolean(serviceResolverUrl) !== Boolean(serviceResolverPublicKey)) {
-    throw new Error(
-      "--service-resolver-url and --service-resolver-public-key must be provided together",
-    );
-  }
   if (!endpoint) throw new Error("missing --endpoint (or TAKOSUMI_ENDPOINT)");
   if (!token) throw new Error("missing --token (or TAKOSUMI_TOKEN)");
   if (!webhookSecret) {
@@ -801,15 +778,6 @@ export function parseServeArgs(
     webhookSecret,
     webhookMode,
     artifactContract: parseArtifactContract(flags["artifact-contract"]),
-    ...(serviceResolverUrl && serviceResolverPublicKey
-      ? {
-        serviceResolvers: [{
-          kind: "anchor" as const,
-          url: serviceResolverUrl,
-          publicKey: serviceResolverPublicKey,
-        }],
-      }
-      : {}),
     ...(accountsUrl ? { accountsUrl } : {}),
     ...(accountsToken ? { accountsToken } : {}),
     ...(accountId ? { accountId } : {}),
@@ -823,6 +791,21 @@ export function parseServeArgs(
       "--rate-limit-window-ms",
     ),
   };
+}
+
+function rejectRemovedServiceResolverOptions(args: readonly string[]): void {
+  if (
+    args.some((arg) =>
+      arg === "--service-resolver-url" ||
+      arg.startsWith("--service-resolver-url=") ||
+      arg === "--service-resolver-public-key" ||
+      arg.startsWith("--service-resolver-public-key=")
+    )
+  ) {
+    throw new Error(
+      "service resolver options were removed; manifests must not declare service imports or serviceResolvers",
+    );
+  }
 }
 
 export async function runServeCli(args: readonly string[]): Promise<number> {

@@ -171,7 +171,8 @@ manifest; `services[]`, `imports[]`, `serviceResolvers[]`, and `${imports.*}`
 are rejected before the kernel request. A kernel HTTP 4xx/5xx response makes the
 CLI exit non-zero.
 
-After the kernel response, `install apply` updates the AppInstallation ledger:
+After the kernel response, `install apply` calls Takosumi Accounts to transition
+the AppInstallation ledger:
 
 ```text
 PATCH /v1/installations/{installation-id}/status
