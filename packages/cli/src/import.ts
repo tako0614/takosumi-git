@@ -20,6 +20,7 @@ export interface ParsedImportArgs {
   readonly mode?: InstallImportMode;
   readonly idempotencyKey?: string;
   readonly identities?: readonly string[];
+  readonly restoreData?: boolean;
   readonly json: boolean;
 }
 
@@ -27,6 +28,7 @@ export interface ImportApplyResult {
   readonly bundlePath: string;
   readonly request: Record<string, unknown>;
   readonly ignoredDataEntries?: readonly string[];
+  readonly dataRestore?: Record<string, unknown>;
   readonly accounts: ImportAccountsResponseSummary;
   readonly importPlan?: Record<string, unknown>;
   readonly response: {
@@ -67,9 +69,10 @@ export function parseImportArgs(
       "idempotency-key",
       "identity",
     ],
-    boolean: ["json"],
+    boolean: ["json", "restore-data"],
     default: {
       json: false,
+      "restore-data": false,
     },
   });
   const positional = (flags._ ?? []).map((value) => String(value));
@@ -122,6 +125,7 @@ export function parseImportArgs(
       ? { idempotencyKey: String(flags["idempotency-key"]) }
       : {}),
     ...(identities.length > 0 ? { identities } : {}),
+    restoreData: Boolean(flags["restore-data"]),
     json: Boolean(flags.json),
   };
 }
@@ -135,6 +139,7 @@ export async function applyImport(
   const exportInput = await readExportBundleInput(options.bundlePath, {
     identities: options.identities ?? [],
     ageExecutable: options.ageExecutable,
+    restoreData: options.restoreData,
   });
   const bundle = exportInput.bundle;
   const request = {
@@ -147,6 +152,7 @@ export async function applyImport(
       ? { targetInstallationId: options.targetInstallationId }
       : {}),
     ...(options.mode ? { mode: options.mode } : {}),
+    ...(exportInput.dataPayload ? { data: exportInput.dataPayload } : {}),
   };
   const response = await (options.fetch ?? fetch)(
     `${
@@ -173,10 +179,13 @@ export async function applyImport(
     bundlePath: options.bundlePath,
     request,
     ...(exportInput.dataEntries.length > 0
-      ? { ignoredDataEntries: exportInput.dataEntries }
+      ? options.restoreData
+        ? {}
+        : { ignoredDataEntries: exportInput.dataEntries }
       : {}),
     accounts: readImportAccountsResponse(body),
     ...(readImportPlan(body) ? { importPlan: readImportPlan(body) } : {}),
+    ...(readDataRestore(body) ? { dataRestore: readDataRestore(body) } : {}),
     response: {
       status: response.status,
       body,
@@ -254,6 +263,7 @@ OPTIONS:
   --mode <mode>                 dedicated | self-hosted
   --idempotency-key <key>       idempotency key for future-compatible retries
   --identity <path[,path]>      age identity file(s) for .tar.zst.age bundles
+  --restore-data                send takos-export/data entries to Accounts import
   --json                        print JSON
 `;
 
@@ -278,6 +288,19 @@ function parseIdentityPaths(value: unknown): readonly string[] {
 interface ReadExportBundleInputResult {
   readonly bundle: Record<string, unknown>;
   readonly dataEntries: readonly string[];
+  readonly dataPayload?: ImportDataPayload;
+}
+
+interface ImportDataPayload {
+  readonly manifest?: Record<string, unknown>;
+  readonly entries: readonly ImportDataPayloadEntry[];
+}
+
+interface ImportDataPayloadEntry {
+  readonly path: string;
+  readonly mediaType?: string;
+  readonly byteLength: number;
+  readonly contentBase64: string;
 }
 
 async function readExportBundleInput(
@@ -285,6 +308,7 @@ async function readExportBundleInput(
   options: {
     readonly identities?: readonly string[];
     readonly ageExecutable?: string;
+    readonly restoreData?: boolean;
   } = {},
 ): Promise<ReadExportBundleInputResult> {
   if (path.endsWith(".age")) {
@@ -292,13 +316,17 @@ async function readExportBundleInput(
     return {
       bundle: parseExportBundleJsonText(result.bundleJson),
       dataEntries: result.dataEntries,
+      ...(result.dataPayload ? { dataPayload: result.dataPayload } : {}),
     };
   }
   if (path.endsWith(".tar.zst")) {
-    const result = await readTarZstBundle(path);
+    const result = await readTarZstBundle(path, {
+      restoreData: options.restoreData,
+    });
     return {
       bundle: parseExportBundleJsonText(result.bundleJson),
       dataEntries: result.dataEntries,
+      ...(result.dataPayload ? { dataPayload: result.dataPayload } : {}),
     };
   }
   return {
@@ -312,8 +340,13 @@ async function readAgeEncryptedTarZstBundle(
   options: {
     readonly identities?: readonly string[];
     readonly ageExecutable?: string;
+    readonly restoreData?: boolean;
   },
-): Promise<{ bundleJson: string; dataEntries: readonly string[] }> {
+): Promise<{
+  bundleJson: string;
+  dataEntries: readonly string[];
+  dataPayload?: ImportDataPayload;
+}> {
   const identities = options.identities ?? [];
   if (identities.length === 0) {
     throw new Error("encrypted export bundle import requires --identity");
@@ -338,7 +371,9 @@ async function readAgeEncryptedTarZstBundle(
         `failed to decrypt export bundle${stderr ? `: ${stderr}` : ""}`,
       );
     }
-    return await readTarZstBundle(clearPath);
+    return await readTarZstBundle(clearPath, {
+      restoreData: options.restoreData,
+    });
   } finally {
     await Deno.remove(clearPath).catch(() => {});
   }
@@ -346,10 +381,19 @@ async function readAgeEncryptedTarZstBundle(
 
 async function readTarZstBundle(
   path: string,
-): Promise<{ bundleJson: string; dataEntries: readonly string[] }> {
+  options: { readonly restoreData?: boolean } = {},
+): Promise<{
+  bundleJson: string;
+  dataEntries: readonly string[];
+  dataPayload?: ImportDataPayload;
+}> {
+  const dataEntries = await readTarZstDataEntries(path);
   return {
     bundleJson: await readTarZstBundleJson(path),
-    dataEntries: await readTarZstDataEntries(path),
+    dataEntries,
+    ...(options.restoreData
+      ? { dataPayload: await readTarZstDataPayload(path, dataEntries) }
+      : {}),
   };
 }
 
@@ -398,6 +442,96 @@ async function readTarZstDataEntries(path: string): Promise<readonly string[]> {
   ).sort((a, b) => a.localeCompare(b));
 }
 
+async function readTarZstDataPayload(
+  archivePath: string,
+  dataEntries: readonly string[],
+): Promise<ImportDataPayload | undefined> {
+  const manifestPath = "takos-export/data/manifest.json";
+  const manifest = dataEntries.includes(manifestPath)
+    ? parseJsonObject(await readTarZstEntryText(archivePath, manifestPath))
+    : undefined;
+  const manifestFiles = Array.isArray(manifest?.files)
+    ? manifest.files.filter(isRecord).map((file) => ({
+      path: stringProperty(file, "path", "path") ?? "",
+      mediaType: stringProperty(file, "media_type", "mediaType"),
+      byteLength: numberProperty(file, "byte_length", "byteLength"),
+    }))
+    : [];
+  const dataFilePaths = manifestFiles.length > 0
+    ? manifestFiles.map((file) => file.path).filter(Boolean)
+    : dataEntries.filter((entry) => entry !== manifestPath);
+  if (dataFilePaths.length === 0) return undefined;
+
+  const entries: ImportDataPayloadEntry[] = [];
+  for (const dataFilePath of dataFilePaths.sort((a, b) => a.localeCompare(b))) {
+    const content = await readTarZstEntryBytes(archivePath, dataFilePath);
+    const manifestFile = manifestFiles.find((file) =>
+      file.path === dataFilePath
+    );
+    entries.push({
+      path: dataFilePath,
+      ...(manifestFile?.mediaType ? { mediaType: manifestFile.mediaType } : {}),
+      byteLength: manifestFile?.byteLength ?? content.byteLength,
+      contentBase64: encodeBase64(content),
+    });
+  }
+  return {
+    ...(manifest ? { manifest } : {}),
+    entries,
+  };
+}
+
+async function readTarZstEntryText(
+  archivePath: string,
+  entryPath: string,
+): Promise<string> {
+  return new TextDecoder().decode(
+    await readTarZstEntryBytes(archivePath, entryPath),
+  );
+}
+
+async function readTarZstEntryBytes(
+  archivePath: string,
+  entryPath: string,
+): Promise<Uint8Array> {
+  const output = await new Deno.Command("tar", {
+    args: [
+      "--use-compress-program=zstd",
+      "-xOf",
+      archivePath,
+      entryPath,
+    ],
+  }).output();
+  if (!output.success) {
+    const stderr = new TextDecoder().decode(output.stderr).trim();
+    throw new Error(
+      `failed to read export data entry ${entryPath}${
+        stderr ? `: ${stderr}` : ""
+      }`,
+    );
+  }
+  return output.stdout;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> {
+  const parsed = JSON.parse(text);
+  if (!isRecord(parsed)) {
+    throw new Error("export data manifest must be a JSON object");
+  }
+  return parsed;
+}
+
+function encodeBase64(bytes: Uint8Array): string {
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
+  }
+  return btoa(binary);
+}
+
 function parseExportBundleJsonText(text: string): Record<string, unknown> {
   try {
     return parseExportBundleJson(JSON.parse(text));
@@ -440,6 +574,13 @@ function renderImportResult(result: ImportApplyResult): string {
     `installation: ${result.accounts.installationId ?? "(unknown)"}`,
     ...(sourceIssuer ? [`source issuer: ${sourceIssuer}`] : []),
     ...(targetIssuer ? [`target issuer: ${targetIssuer}`] : []),
+    ...(result.dataRestore
+      ? [
+        `data restore: ${
+          stringProperty(result.dataRestore, "status", "status") ?? "reported"
+        }`,
+      ]
+      : []),
     ...(result.ignoredDataEntries?.length
       ? [
         `data restore: skipped (${result.ignoredDataEntries.length} archive data entries ignored by current import API)`,
@@ -486,6 +627,15 @@ function readImportPlan(body: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+function readDataRestore(body: unknown): Record<string, unknown> | undefined {
+  const record = isRecord(body) ? body : {};
+  return isRecord(record.data_restore)
+    ? record.data_restore
+    : isRecord(record.dataRestore)
+    ? record.dataRestore
+    : undefined;
+}
+
 function readInstallationId(body: unknown): string | undefined {
   const record = isRecord(body) ? body : {};
   const installation = isRecord(record.installation) ? record.installation : {};
@@ -511,6 +661,17 @@ function stringProperty(
 ): string | undefined {
   const value = record[snakeKey] ?? record[camelKey];
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberProperty(
+  record: Record<string, unknown>,
+  snakeKey: string,
+  camelKey: string,
+): number | undefined {
+  const value = record[snakeKey] ?? record[camelKey];
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : undefined;
 }
 
 async function readResponseBody(response: Response): Promise<unknown> {

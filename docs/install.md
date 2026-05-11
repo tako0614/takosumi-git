@@ -300,7 +300,9 @@ already completed and includes `downloadUrl`, `takosumi-git export --output`
 downloads that bundle to disk. Import reads a JSON AppInstallation export
 bundle, a `tar.zst` archive containing `takos-export/bundle.json`, or an
 age-wrapped `tar.zst.age` archive when `--identity` is supplied, and creates the
-target AppInstallation through Accounts.
+target AppInstallation through Accounts. Archive data entries are metadata-only
+by default; pass `--restore-data` only when the target Accounts instance has an
+import data restorer configured.
 
 ```bash
 takosumi-git materialize inst_01J... \
@@ -324,7 +326,8 @@ takosumi-git import ./takos-export.tar.zst.age \
   --space-id space_self_host \
   --subject tsub_owner \
   --auth-issuer https://accounts.self-host.example \
-  --identity ./age-identity.txt
+  --identity ./age-identity.txt \
+  --restore-data
 ```
 
 `--auth-issuer` は import 先 Takosumi Accounts issuer を指します。Keycloak /

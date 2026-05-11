@@ -58,6 +58,7 @@ Deno.test("parseImportArgs reads import options and aliases", () => {
     "idem-import",
     "--identity",
     "identity-a.txt,identity-b.txt",
+    "--restore-data",
     "--json",
   ]);
 
@@ -72,6 +73,7 @@ Deno.test("parseImportArgs reads import options and aliases", () => {
   assertEquals(parsed.idempotencyKey, "idem-import");
   assertStringIncludes(parsed.identities?.[0] ?? "", "identity-a.txt");
   assertStringIncludes(parsed.identities?.[1] ?? "", "identity-b.txt");
+  assertEquals(parsed.restoreData, true);
   assertEquals(parsed.json, true);
 });
 
@@ -255,6 +257,7 @@ Deno.test("applyImport reports data entries that current import API ignores", as
   const root = await Deno.makeTempDir({
     prefix: "takosumi-git-import-data-",
   });
+  const requests: Request[] = [];
   try {
     const sourceRoot = join(root, "src");
     await Deno.mkdir(join(sourceRoot, "takos-export", "data", "postgres"), {
@@ -307,12 +310,14 @@ Deno.test("applyImport reports data entries that current import API ignores", as
       spaceId: "space_target",
       createdBySubject: "tsub_target",
       json: true,
-      fetch: () =>
-        Promise.resolve(Response.json({
+      fetch: (input, init) => {
+        requests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
           installation: {
             id: "inst_target",
           },
-        }, { status: 202 })),
+        }, { status: 202 }));
+      },
     });
 
     assertEquals(result.accounts.installationId, "inst_target");
@@ -324,6 +329,44 @@ Deno.test("applyImport reports data entries that current import API ignores", as
       (result.request.bundle as { kind: string }).kind,
       "takosumi.accounts.installation-export-bundle@v1",
     );
+    assertEquals((await requests[0].json()).data, undefined);
+
+    const restoreRequests: Request[] = [];
+    const restoreResult = await applyImport({
+      bundlePath,
+      accountsUrl: "https://accounts.target.test/",
+      accountId: "acct_target",
+      spaceId: "space_target",
+      createdBySubject: "tsub_target",
+      restoreData: true,
+      json: true,
+      fetch: (input, init) => {
+        restoreRequests.push(new Request(input, init));
+        return Promise.resolve(Response.json({
+          installation: {
+            id: "inst_target",
+          },
+          data_restore: {
+            status: "restored",
+            entries: ["takos-export/data/postgres/dump.sql"],
+          },
+        }, { status: 202 }));
+      },
+    });
+
+    assertEquals(restoreResult.ignoredDataEntries, undefined);
+    assertEquals(restoreResult.dataRestore?.status, "restored");
+    const restoreBody = await restoreRequests[0].json();
+    assertEquals(
+      restoreBody.data.manifest.kind,
+      "takosumi.accounts.installation-export-data-manifest@v1",
+    );
+    assertEquals(restoreBody.data.entries, [{
+      path: "takos-export/data/postgres/dump.sql",
+      mediaType: "application/sql",
+      byteLength: 10,
+      contentBase64: btoa("select 1;\n"),
+    }]);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
