@@ -37,6 +37,16 @@ permissions:
     - logs.read.own
 `;
 
+const APP_YML_WITH_LAUNCH = APP_YML.replace(
+  "bindings:\n",
+  `bindings:
+  bootstrap:
+    type: install-launch-token@v1
+    required: true
+    consumePath: /_takosumi/launch
+`,
+);
+
 function baseOptions(dispatches: WebhookDispatchJob[] = []) {
   return {
     host: "127.0.0.1",
@@ -222,7 +232,7 @@ Deno.test("serve preview API accepts Git URL source", async () => {
     await Deno.mkdir(join(checkoutRoot, ".takosumi"));
     await Deno.writeTextFile(
       join(checkoutRoot, ".takosumi", "app.yml"),
-      APP_YML,
+      APP_YML_WITH_LAUNCH,
     );
     await Deno.writeTextFile(
       join(checkoutRoot, ".takosumi", "manifest.yml"),
@@ -279,7 +289,7 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
     await Deno.mkdir(join(checkoutRoot, ".takosumi"));
     await Deno.writeTextFile(
       join(checkoutRoot, ".takosumi", "app.yml"),
-      APP_YML,
+      APP_YML_WITH_LAUNCH,
     );
     await Deno.writeTextFile(
       join(checkoutRoot, ".takosumi", "manifest.yml"),
@@ -292,6 +302,7 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
       accountsUrl: "http://accounts.example",
       accountsToken: "accounts-token",
       deployToken: "deploy-token",
+      runtimeBaseUrl: "https://hello.example.test",
       accountId: "acct_default",
       spaceId: "space_default",
       subject: "tsub_default",
@@ -307,7 +318,8 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
         });
       },
       installApplyFetch: (input, init) => {
-        requests.push(new Request(input, init));
+        const request = new Request(input, init);
+        requests.push(request);
         const url = String(input);
         if (url.includes("/v1/deployments")) {
           return Promise.resolve(Response.json({
@@ -320,8 +332,40 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
             installation: { id: "inst_1", status: "ready" },
           }));
         }
+        if (
+          url.endsWith("/v1/installations/inst_1/launch-token") &&
+          request.method === "GET"
+        ) {
+          return Promise.resolve(Response.json({
+            issuer: "https://accounts.example",
+            audience: "example.hello",
+            algorithm: "RS256",
+            kid: "launch-test",
+            env: {
+              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+              INSTALL_LAUNCH_AUDIENCE: "example.hello",
+              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+            },
+          }));
+        }
+        if (
+          url.endsWith("/v1/installations/inst_1/launch-token") &&
+          request.method === "POST"
+        ) {
+          return Promise.resolve(Response.json({
+            url: "https://hello.example.test/_takosumi/launch?token=launch-jws",
+            token: "launch-jws",
+          }));
+        }
         return Promise.resolve(Response.json({
           installation: { id: "inst_1" },
+          bindings: [{
+            name: "bootstrap",
+            kind: "install-launch-token@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+            secret_refs: [],
+          }],
         }, { status: 202 }));
       },
     });
@@ -348,7 +392,11 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
     assertEquals(body.kind, "takosumi-git.install-apply@v1");
     assertEquals(body.response.status, 202);
     assertEquals(body.accounts.installationId, "inst_1");
-    assertEquals(requests.length, 3);
+    assertEquals(
+      body.launch.url,
+      "https://hello.example.test/_takosumi/launch?token=launch-jws",
+    );
+    assertEquals(requests.length, 5);
     assertEquals(requests[0].url, "http://accounts.example/v1/installations");
     assertEquals(
       requests[0].headers.get("authorization"),
@@ -362,15 +410,30 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
       installBody.source.commit,
       "0123456789abcdef0123456789abcdef01234567",
     );
-    assertEquals(requests[1].url, "http://kernel.example/v1/deployments");
     assertEquals(
-      requests[1].headers.get("authorization"),
+      requests[1].url,
+      "http://accounts.example/v1/installations/inst_1/launch-token",
+    );
+    assertEquals(requests[1].method, "GET");
+    assertEquals(requests[2].url, "http://kernel.example/v1/deployments");
+    assertEquals(
+      requests[2].headers.get("authorization"),
       "Bearer deploy-token",
     );
     assertEquals(
-      requests[2].url,
+      requests[3].url,
       "http://accounts.example/v1/installations/inst_1/status",
     );
+    assertEquals(
+      requests[4].url,
+      "http://accounts.example/v1/installations/inst_1/launch-token",
+    );
+    assertEquals(requests[4].method, "POST");
+    assertEquals(await requests[4].json(), {
+      purpose: "install-bootstrap",
+      ttlSeconds: 120,
+      redirectUri: "https://hello.example.test/_takosumi/launch",
+    });
   } finally {
     await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
   }
