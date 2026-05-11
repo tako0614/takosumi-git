@@ -992,6 +992,10 @@ resources:
         BLOB_SECRET_KEY: \${secrets.blob.secretKey}
         INSTALL_LAUNCH_PUBLIC_KEY: \${bindings.bootstrap.publicKey}
         INSTALL_LAUNCH_CONSUME_PATH: \${bindings.bootstrap.consumePath}
+        DATABASE_CONFIG_REF: \${refs.database.configRef}
+        DATABASE_SECRET_REF: \${refs.database.secretRefs[0]}
+        BLOB_CONFIG_REF: \${refs.blob.config_ref}
+        AUTH_SECRET_REF: \${refs.auth.secret_refs[0]}
         INSTALLATION_ID: \${installation.id}
         SPACE_ID: \${installation.spaceId}
         BASE_URL: \${installation.baseUrl}
@@ -1112,11 +1116,28 @@ resources:
       env.INSTALL_LAUNCH_CONSUME_PATH,
       "/v1/installations/inst_1/launch-token/consume",
     );
+    assertEquals(
+      env.DATABASE_CONFIG_REF,
+      "takosumi-accounts://installations/inst_1/bindings/database/postgres/main",
+    );
+    assertEquals(
+      env.DATABASE_SECRET_REF,
+      "takosumi-accounts://installations/inst_1/bindings/database/secrets/password",
+    );
+    assertEquals(
+      env.BLOB_CONFIG_REF,
+      "takosumi-accounts://installations/inst_1/bindings/blob/object-store/main",
+    );
+    assertEquals(
+      env.AUTH_SECRET_REF,
+      "takosumi-accounts://installations/inst_1/bindings/auth/secrets/client-secret",
+    );
     assertEquals(env.INSTALLATION_ID, "inst_1");
     assertEquals(env.SPACE_ID, "space_1");
     assertEquals(env.BASE_URL, "http://localhost:8787");
     assertEquals(JSON.stringify(deployBody).includes("${bindings."), false);
     assertEquals(JSON.stringify(deployBody).includes("${secrets."), false);
+    assertEquals(JSON.stringify(deployBody).includes("${refs."), false);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

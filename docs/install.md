@@ -201,12 +201,15 @@ original approval evidence.
 When `install apply` also deploys to a kernel endpoint, takosumi-git uses the
 Accounts create response (`binding_env`, OIDC client material, and
 `GET /v1/installations/{id}/launch-token` public config) to resolve explicit
-`${bindings.*}`, `${secrets.*}`, and `${installation.*}` placeholders, then
-inject missing default runtime environment values into compute resources before
-`POST /v1/deployments`. Explicit `env:` keys in the manifest win after their
-supported placeholders are resolved; only missing keys such as `OIDC_CLIENT_ID`,
-`OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI`, `DATABASE_URL`, `BLOB_*`,
-`DEPLOY_INTENT_*`, `TAKOS_INSTALLATION_ID`, and `INSTALL_LAUNCH_*` are filled.
+`${bindings.*}`, `${secrets.*}`, `${refs.*}`, and `${installation.*}`
+placeholders, then inject missing default runtime environment values into
+compute resources before `POST /v1/deployments`. `${refs.<binding>.configRef}`
+and `${refs.<binding>.secretRefs[0]}` expose Accounts-owned materialized
+AppBinding refs, never pending `takosumi-git://...` approval refs. Explicit
+`env:` keys in the manifest win after their supported placeholders are resolved;
+only missing keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
+`OIDC_REDIRECT_URI`, `DATABASE_URL`, `BLOB_*`, `DEPLOY_INTENT_*`,
+`TAKOS_INSTALLATION_ID`, and `INSTALL_LAUNCH_*` are filled.
 
 If a required provider-backed binding (`database.postgres@v1`,
 `object-store.s3-compatible@v1`, `domain.http@v1`, or `deploy-intent.gitops@v1`)
@@ -246,12 +249,12 @@ documented in [Artifact URI Contract](./artifact-contract.md).
 
 Compiled manifests must not carry installer-only placeholders.
 `takosumi-git install apply` resolves Accounts-backed `${bindings.*}`,
-`${secrets.*}`, and `${installation.*}` values after the Takosumi Accounts
-install API creates the AppInstallation record and before kernel deploy. If
-`.takosumi/manifest.yml` still contains `${params.*}`, `${installation.*}`,
-`${artifacts.*}`, `${bindings.*}`, `${secrets.*}`, legacy `${refs.*}`, or
-removed `${imports.*}` references after the deploy request build,
-`takosumi-git install apply` fails before `POST /v1/deployments`.
+`${secrets.*}`, `${refs.*}`, and `${installation.*}` values after the Takosumi
+Accounts install API creates the AppInstallation record and before kernel
+deploy. If `.takosumi/manifest.yml` still contains `${params.*}`,
+`${installation.*}`, `${artifacts.*}`, `${bindings.*}`, `${secrets.*}`,
+`${refs.*}`, or removed `${imports.*}` references after the deploy request
+build, `takosumi-git install apply` fails before `POST /v1/deployments`.
 `takosumi-git push` has no Accounts materialization phase, so it fails before
 deploy when those installer-only placeholders are present.
 

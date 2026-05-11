@@ -229,9 +229,10 @@ explicit grant / account API / OIDC discovery / BillingPort で materialize
 `${imports.*}` は残しません (must not remain)。
 
 `bindings.<name>` の `<name>` は、account-plane materializer が提供する
-`${bindings.<name>.<key>}` / `${secrets.<name>.<key>}` reserved vocabulary と
-紐づきます。`install apply` は Takosumi Accounts が所有する AppInstallation の
-materialization result で Accounts-backed placeholder を解決し、deploy request
+`${bindings.<name>.<key>}` / `${secrets.<name>.<key>}` /
+`${refs.<name>.configRef}` / `${refs.<name>.secretRefs[0]}` reserved vocabulary
+と紐づきます。`install apply` は Takosumi Accounts が所有する AppInstallation の
+materialization result で Accounts-backed placeholder を解決し、 deploy request
 build 後も unresolved installer-only placeholder が残る場合は kernel request
 前に失敗します。`push` / `preview` には Accounts materialization phase
 がないため、installer-only placeholder を deploy 前に拒否します。

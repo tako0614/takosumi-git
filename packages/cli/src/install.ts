@@ -2623,13 +2623,20 @@ function resolveInstallerPlaceholder(
       `entry manifest contains removed imports placeholder at ${path}: ${placeholder}`,
     );
   }
-  if (namespace === "refs") {
-    throw new Error(
-      `entry manifest contains legacy refs placeholder at ${path}: ${placeholder}`,
-    );
-  }
   if (namespace === "installation") {
     return resolveInstallationPlaceholder(keyPath, placeholder, context);
+  }
+  if (namespace === "refs") {
+    const dot = keyPath.indexOf(".");
+    const bindingName = dot === -1 ? keyPath : keyPath.slice(0, dot);
+    const bindingKey = dot === -1 ? "" : keyPath.slice(dot + 1);
+    return resolveBindingRefPlaceholder({
+      ...context,
+      bindingName,
+      bindingKey,
+      placeholder,
+      path,
+    });
   }
   if (namespace === "bindings" || namespace === "secrets") {
     const dot = keyPath.indexOf(".");
@@ -2701,6 +2708,56 @@ function resolveBindingPlaceholder(input: {
   const values = input.secret
     ? secretPlaceholderValues(binding.type, input)
     : bindingPlaceholderValues(binding.type, input);
+  return requiredPlaceholderValue(values[input.bindingKey], input.placeholder);
+}
+
+function resolveBindingRefPlaceholder(input: {
+  app: InstallableApp;
+  accounts: AccountsInstallResponseSummary;
+  bindingName: string;
+  bindingKey: string;
+  placeholder: string;
+  path: string;
+}): unknown {
+  const binding = input.app.bindings[input.bindingName];
+  if (!binding) {
+    throw new Error(
+      `entry manifest references unknown binding at ${input.path}: ${input.placeholder}`,
+    );
+  }
+  const materialized = bindingRecordForName(input.accounts, input.bindingName);
+  if (!materialized) {
+    throw new Error(
+      `entry manifest references unmaterialized binding at ${input.path}: ${input.placeholder}`,
+    );
+  }
+  const configRef = stringProperty(materialized, "config_ref", "configRef");
+  if (!configRef || configRef.startsWith("takosumi-git://")) {
+    throw new Error(
+      `entry manifest references unmaterialized binding at ${input.path}: ${input.placeholder}`,
+    );
+  }
+  const secretRefs = stringArrayProperty(
+    materialized,
+    "secret_refs",
+    "secretRefs",
+  );
+  const values: Record<string, unknown> = {
+    id: stringProperty(materialized, "id", "id"),
+    installationId: stringProperty(
+      materialized,
+      "installation_id",
+      "installationId",
+    ),
+    name: stringProperty(materialized, "name", "name"),
+    kind: stringProperty(materialized, "kind", "kind"),
+    configRef,
+    config_ref: configRef,
+    secretRefs,
+    secret_refs: secretRefs,
+    ...indexedValues("secretRefs", secretRefs),
+    ...indexedValues("secret_refs", secretRefs),
+  };
   return requiredPlaceholderValue(values[input.bindingKey], input.placeholder);
 }
 
