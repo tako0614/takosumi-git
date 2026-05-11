@@ -1898,7 +1898,7 @@ APPLY OPTIONS:
   --account-id <id>     ledger account id (or TAKOS_ACCOUNT_ID)
   --space-id <id>       target space id (or --space / TAKOS_SPACE_ID)
   --subject <tsub_...>  installer subject (or TAKOSUMI_SUBJECT/TAKOS_SUBJECT)
-  --mode <mode>         shared-cell | dedicated | self-hosted
+  --mode <mode>         shared-cell | dedicated | self-hosted (default: first runtime.modes entry)
   --source-commit <sha> resolved 40-char source commit pin
   --runtime-base-url <url>
                         app runtime base URL for OIDC redirect materialization

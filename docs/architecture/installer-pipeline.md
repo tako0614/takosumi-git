@@ -71,13 +71,13 @@ takosumi-git install https://github.com/example/my-app --ref v1.2.3
 
 主な flag:
 
-| flag                            | 意味                                                    |
-| ------------------------------- | ------------------------------------------------------- |
-| `--ref <tag\|commit>`           | install 対象の ref。tag か commit に pin する (§4 参照) |
-| `--space <id>`                  | 投下先 Space。省略時は personal space                   |
-| `--mode shared-cell\|dedicated` | RuntimeBinding の初期 mode (default `shared-cell`)      |
-| `--binding <key>=<value>`       | binding 上書き (例: `--binding auth=keycloak-prod`)     |
-| `--auto-approve`                | preview 確認なしで実行 (CI 用、対話 install では禁止)   |
+| flag                                         | 意味                                                    |
+| -------------------------------------------- | ------------------------------------------------------- |
+| `--ref <tag\|commit>`                        | install 対象の ref。tag か commit に pin する (§4 参照) |
+| `--space <id>`                               | 投下先 Space。省略時は personal space                   |
+| `--mode shared-cell\|dedicated\|self-hosted` | RuntimeBinding の初期 mode (default `shared-cell`)      |
+| `--binding <key>=<value>`                    | binding 上書き (例: `--binding auth=keycloak-prod`)     |
+| `--auto-approve`                             | preview 確認なしで実行 (CI 用、対話 install では禁止)   |
 
 CLI は Git URL / ref を受ける installer front-end です。preview / approve は
 Takosumi Accounts の public lifecycle と operator UI の背後で takosumi-git

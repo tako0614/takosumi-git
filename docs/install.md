@@ -158,6 +158,11 @@ materialized into absolute redirect URIs and sent as an `oidcClients[]` request
 so Takosumi Accounts can create the per-installation OIDC client in the same
 ledger transaction.
 
+`--mode` accepts `shared-cell`, `dedicated`, or `self-hosted`. When omitted,
+`install apply` uses the first value declared in `.takosumi/app.yml`
+`runtime.modes`; Takos-first apps should declare `shared-cell` first for the
+warm-pool install path.
+
 If `--endpoint` (or `TAKOSUMI_ENDPOINT`) is supplied, `install apply` then posts
 the compiled manifest to the Takosumi kernel:
 

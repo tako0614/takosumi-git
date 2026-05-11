@@ -553,6 +553,51 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.deployToken, "deploy-secret");
 });
 
+Deno.test("parseInstallArgs accepts install runtime modes", () => {
+  for (const mode of ["shared-cell", "dedicated", "self-hosted"] as const) {
+    const parsed = parseInstallArgs([
+      "apply",
+      "--mode",
+      mode,
+    ], {
+      get(key: string) {
+        const env: Record<string, string> = {
+          TAKOSUMI_ACCOUNTS_URL: "http://accounts.example",
+          TAKOS_ACCOUNT_ID: "acct_1",
+          TAKOS_SPACE_ID: "space_1",
+          TAKOSUMI_SUBJECT: "tsub_owner",
+        };
+        return env[key];
+      },
+    });
+
+    assertEquals(parsed.mode, mode);
+  }
+});
+
+Deno.test("parseInstallArgs rejects invalid install runtime mode", () => {
+  assertThrows(
+    () =>
+      parseInstallArgs([
+        "apply",
+        "--mode",
+        "serverless",
+      ], {
+        get(key: string) {
+          const env: Record<string, string> = {
+            TAKOSUMI_ACCOUNTS_URL: "http://accounts.example",
+            TAKOS_ACCOUNT_ID: "acct_1",
+            TAKOS_SPACE_ID: "space_1",
+            TAKOSUMI_SUBJECT: "tsub_owner",
+          };
+          return env[key];
+        },
+      }),
+    Error,
+    "--mode must be one of shared-cell|dedicated|self-hosted",
+  );
+});
+
 Deno.test("parseInstallArgs rejects removed service resolver flags", () => {
   assertThrows(
     () =>
@@ -697,7 +742,6 @@ Deno.test("applyInstall posts AppInstallation create request", async () => {
       accountId: "acct_1",
       spaceId: "space_1",
       createdBySubject: "tsub_owner",
-      mode: "shared-cell",
       fetch: (input, init) => {
         requests.push(new Request(input, init));
         return Promise.resolve(Response.json({
