@@ -589,6 +589,54 @@ Deno.test("push rejects forbidden manifest import fields", async () => {
   }
 });
 
+Deno.test("push rejects unresolved installer placeholders without app.yml", async () => {
+  const project = await makeProject({
+    manifest: {
+      apiVersion: "1.0",
+      kind: "Manifest",
+      metadata: { name: "demo" },
+      resources: [{
+        shape: "web-service@v1",
+        name: "web",
+        spec: {
+          image:
+            "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          port: 8080,
+          env: {
+            OIDC_CLIENT_ID: "${bindings.auth.clientId}",
+          },
+        },
+      }],
+    },
+    workflows: {},
+  });
+
+  let fetchCalls = 0;
+  try {
+    await assertRejects(
+      () =>
+        push({
+          endpoint: "http://kernel.example",
+          token: "x",
+          manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+          workflowsDir: join(project.root, ".takosumi", "workflows"),
+          mode: "apply",
+          dryRun: false,
+          fetch: (() => {
+            fetchCalls++;
+            return Promise.resolve(new Response(null, { status: 204 }));
+          }) as typeof fetch,
+          stdout: () => {},
+        }),
+      Error,
+      "unresolved installer placeholder",
+    );
+    assertEquals(fetchCalls, 0, "placeholder validation must run before POST");
+  } finally {
+    await project.cleanup();
+  }
+});
+
 Deno.test("push surfaces non-zero step exit as error", async () => {
   const project = await makeProject({
     manifest: {

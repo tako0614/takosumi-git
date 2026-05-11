@@ -1293,7 +1293,7 @@ export function compileInstallManifest(
   };
 }
 
-function assertNoInstallerPlaceholders(
+export function assertNoInstallerPlaceholders(
   value: unknown,
   path = "$",
 ): void {

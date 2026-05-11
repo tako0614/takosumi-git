@@ -52,6 +52,7 @@ import {
 } from "@takos/takosumi-git-workflow-runner";
 import {
   assertNoForbiddenKernelManifestFields,
+  assertNoInstallerPlaceholders,
   compileInstallManifest,
   parseInstallableAppYaml,
 } from "./install.ts";
@@ -430,6 +431,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
     : undefined;
   if (compiled) manifest = compiled.manifest;
   assertNoForbiddenKernelManifestFields(manifest);
+  assertNoInstallerPlaceholders(manifest);
   const entries = extractResourceEntries(manifest);
   const executorFactory = options.executorFactory ??
     ((_dir: string) => defaultStepExecutor(projectRoot));
