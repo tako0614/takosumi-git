@@ -31,6 +31,51 @@ export interface ManifestEnvelope {
   }>;
 }
 
+/**
+ * Walk a parsed-YAML value, assert the manifest discriminators, and return
+ * a typed `ManifestEnvelope`. Sub-trees (metadata, template, resources) are
+ * passed through to the kernel which owns deeper validation; this parser
+ * only asserts the envelope shape so downstream code can drop
+ * `as unknown as ManifestEnvelope` casts.
+ */
+export function parseManifestEnvelope(
+  value: Record<string, unknown>,
+  label = "manifest",
+): ManifestEnvelope {
+  if (value.apiVersion !== "1.0") {
+    throw new Error(`${label}.apiVersion must be "1.0"`);
+  }
+  if (value.kind !== "Manifest") {
+    throw new Error(`${label}.kind must be "Manifest"`);
+  }
+  const envelope: ManifestEnvelope = { apiVersion: "1.0", kind: "Manifest" };
+  if (typeof value.namespace === "string") {
+    Object.assign(envelope, { namespace: value.namespace });
+  }
+  if (
+    value.metadata !== undefined && typeof value.metadata === "object" &&
+    value.metadata !== null && !Array.isArray(value.metadata)
+  ) {
+    Object.assign(envelope, {
+      metadata: value.metadata as ManifestEnvelope["metadata"],
+    });
+  }
+  if (
+    value.template !== undefined && typeof value.template === "object" &&
+    value.template !== null && !Array.isArray(value.template)
+  ) {
+    Object.assign(envelope, {
+      template: value.template as ManifestEnvelope["template"],
+    });
+  }
+  if (Array.isArray(value.resources)) {
+    Object.assign(envelope, {
+      resources: value.resources as ManifestEnvelope["resources"],
+    });
+  }
+  return envelope;
+}
+
 export interface DeployRequest {
   readonly mode: DeployMode;
   readonly manifest: ManifestEnvelope;

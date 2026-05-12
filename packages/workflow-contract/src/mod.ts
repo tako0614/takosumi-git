@@ -38,6 +38,84 @@ export interface WorkflowFile {
   readonly jobs: readonly WorkflowJobSpec[];
 }
 
+/**
+ * Walk a parsed-YAML value and assert the workflow file shape. The kernel
+ * never sees the workflow file — only takosumi-git's workflow-runner
+ * consumes it — so a structural assertion here is sufficient to drop
+ * `as unknown as WorkflowFile` casts at call sites.
+ */
+export function parseWorkflowFile(
+  value: unknown,
+  source: string,
+): WorkflowFile {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error(`${source}: workflow must be a JSON object`);
+  }
+  const obj = value as Record<string, unknown>;
+  if (obj.version !== "0") {
+    throw new Error(`${source}.version must be "0"`);
+  }
+  if (!Array.isArray(obj.jobs)) {
+    throw new Error(`${source}.jobs must be an array`);
+  }
+  const jobs: WorkflowJobSpec[] = [];
+  for (let i = 0; i < obj.jobs.length; i++) {
+    const job = obj.jobs[i];
+    if (typeof job !== "object" || job === null || Array.isArray(job)) {
+      throw new Error(`${source}.jobs[${i}] must be an object`);
+    }
+    const jobRecord = job as Record<string, unknown>;
+    if (typeof jobRecord.name !== "string") {
+      throw new Error(`${source}.jobs[${i}].name must be a string`);
+    }
+    if (!Array.isArray(jobRecord.steps)) {
+      throw new Error(`${source}.jobs[${i}].steps must be an array`);
+    }
+    const steps: WorkflowStepSpec[] = [];
+    for (let s = 0; s < jobRecord.steps.length; s++) {
+      const step = jobRecord.steps[s];
+      if (typeof step !== "object" || step === null || Array.isArray(step)) {
+        throw new Error(`${source}.jobs[${i}].steps[${s}] must be an object`);
+      }
+      const stepRecord = step as Record<string, unknown>;
+      if (typeof stepRecord.name !== "string") {
+        throw new Error(
+          `${source}.jobs[${i}].steps[${s}].name must be a string`,
+        );
+      }
+      if (typeof stepRecord.run !== "string") {
+        throw new Error(
+          `${source}.jobs[${i}].steps[${s}].run must be a string`,
+        );
+      }
+      steps.push({ name: stepRecord.name, run: stepRecord.run });
+    }
+    const built: WorkflowJobSpec = { name: jobRecord.name, steps };
+    const artifactRaw = jobRecord.artifact;
+    if (artifactRaw !== undefined) {
+      if (
+        typeof artifactRaw !== "object" || artifactRaw === null ||
+        Array.isArray(artifactRaw)
+      ) {
+        throw new Error(`${source}.jobs[${i}].artifact must be an object`);
+      }
+      const artifactRecord = artifactRaw as Record<string, unknown>;
+      if (typeof artifactRecord.name !== "string") {
+        throw new Error(
+          `${source}.jobs[${i}].artifact.name must be a string`,
+        );
+      }
+      const artifact: WorkflowArtifactSpec = { name: artifactRecord.name };
+      if (typeof artifactRecord.path === "string") {
+        Object.assign(artifact, { path: artifactRecord.path });
+      }
+      Object.assign(built, { artifact });
+    }
+    jobs.push(built);
+  }
+  return { version: "0", jobs };
+}
+
 export interface WorkflowRunResult {
   readonly job: string;
   readonly artifact?: ResolvedArtifact;

@@ -34,7 +34,7 @@ import {
   type DeploymentProvenance,
   type DeploymentResourceArtifactProvenance,
   type DeployMode,
-  type ManifestEnvelope,
+  parseManifestEnvelope,
   postDeployment,
 } from "@takos/takosumi-git-deploy-client";
 import type {
@@ -580,7 +580,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
     },
     {
       mode: options.mode,
-      manifest: manifest as unknown as ManifestEnvelope,
+      manifest: parseManifestEnvelope(manifest),
       ...(provenance ? { provenance } : {}),
     },
   );

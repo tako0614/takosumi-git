@@ -3,6 +3,7 @@ import { isAbsolute, join, resolve } from "@std/path";
 import {
   type DeployMode,
   type ManifestEnvelope,
+  parseManifestEnvelope,
   postDeployment,
 } from "@takos/takosumi-git-deploy-client";
 import type { StepExecutor } from "@takos/takosumi-git-workflow-runner";
@@ -249,7 +250,7 @@ function parseDeployIntentDocument(text: string): DeployIntentDocument {
     id: value.id,
     mode,
     ...(isRecord(value.metadata) ? { metadata: value.metadata } : {}),
-    manifest: value.manifest as unknown as ManifestEnvelope,
+    manifest: parseManifestEnvelope(value.manifest, "deploy intent manifest"),
   };
 }
 

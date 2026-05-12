@@ -13,13 +13,15 @@ import { dirname, isAbsolute, join, resolve } from "@std/path";
 import {
   type DeployResponse,
   type ManifestEnvelope,
+  parseManifestEnvelope,
   postDeployment,
 } from "@takos/takosumi-git-deploy-client";
-import type {
-  ComputeWorkflowRef,
-  WorkflowEvent,
-  WorkflowFile,
-  WorkflowJobSpec,
+import {
+  type ComputeWorkflowRef,
+  parseWorkflowFile,
+  type WorkflowEvent,
+  type WorkflowFile,
+  type WorkflowJobSpec,
 } from "@takos/takosumi-git-workflow-contract";
 import {
   type ArtifactResolver,
@@ -571,8 +573,8 @@ function parseBindings(
     }
     const allowedKeys = bindingAllowedKeys(type as InstallableAppBindingType);
     unknownKeys(raw, `bindings.${name}`, allowedKeys, issues);
-    const binding: Record<string, unknown> = {
-      type,
+    const binding: BindingBuilder = {
+      type: type as InstallableAppBindingType,
       required: bindingRequired(
         type as InstallableAppBindingType,
         raw,
@@ -587,10 +589,17 @@ function parseBindings(
       binding,
       issues,
     );
-    bindings[name] = binding as unknown as InstallableAppBinding;
+    bindings[name] = binding;
   }
   return bindings;
 }
+
+// Mutable counterpart of `InstallableAppBinding` used as the builder during
+// parsing. Strip `readonly` so `parseBindingSpecificFields` can populate
+// fields after they pass per-field validation.
+type BindingBuilder = {
+  -readonly [K in keyof InstallableAppBinding]: InstallableAppBinding[K];
+};
 
 function bindingAllowedKeys(
   type: InstallableAppBindingType,
@@ -628,7 +637,7 @@ function parseBindingSpecificFields(
   name: string,
   type: InstallableAppBindingType,
   raw: Record<string, unknown>,
-  binding: Record<string, unknown>,
+  binding: BindingBuilder,
   issues: InstallableAppValidationIssue[],
 ): void {
   if (type === "identity.oidc@v1") {
@@ -648,12 +657,19 @@ function parseBindingSpecificFields(
       } else binding.subjectMode = raw.subjectMode;
     }
     if (raw.tokenEndpointAuthMethod !== undefined) {
-      if (!oidcAuthMethods.has(String(raw.tokenEndpointAuthMethod))) {
+      const method = String(raw.tokenEndpointAuthMethod);
+      if (
+        method === "client_secret_basic" ||
+        method === "client_secret_post" ||
+        method === "private_key_jwt"
+      ) {
+        binding.tokenEndpointAuthMethod = method;
+      } else {
         issues.push({
           path: `bindings.${name}.tokenEndpointAuthMethod`,
           message: "is not supported",
         });
-      } else binding.tokenEndpointAuthMethod = raw.tokenEndpointAuthMethod;
+      }
     }
     const scopes = validateOptionalStringArray(
       raw.allowedScopes,
@@ -670,12 +686,13 @@ function parseBindingSpecificFields(
       binding.allowedScopes = scopes;
     }
   } else if (type === "database.postgres@v1") {
-    if (!postgresPlans.has(String(raw.plan))) {
+    const planValue = String(raw.plan);
+    if (!postgresPlans.has(planValue)) {
       issues.push({
         path: `bindings.${name}.plan`,
         message: "must be nano, small, medium, large, or xlarge",
       });
-    } else binding.plan = raw.plan;
+    } else binding.plan = planValue;
     if (raw.version !== undefined) {
       if (!postgresVersions.has(String(raw.version))) {
         issues.push({
@@ -713,12 +730,13 @@ function parseBindingSpecificFields(
       } else binding.backupRetentionDays = backupRetentionDays;
     }
   } else if (type === "object-store.s3-compatible@v1") {
-    if (!objectStorePlans.has(String(raw.plan))) {
+    const planValue = String(raw.plan);
+    if (!objectStorePlans.has(planValue)) {
       issues.push({
         path: `bindings.${name}.plan`,
         message: "must be standard, infrequent-access, or archive",
       });
-    } else binding.plan = raw.plan;
+    } else binding.plan = planValue;
     if (raw.encryption !== undefined) {
       if (!isRecord(raw.encryption)) {
         issues.push({
@@ -758,12 +776,13 @@ function parseBindingSpecificFields(
       } else binding.lifecycleDays = lifecycleDays;
     }
   } else if (type === "domain.http@v1") {
-    if (
-      raw.hostname === "auto" ||
-      (isRecord(raw.hostname) && typeof raw.hostname.custom === "string" &&
-        raw.hostname.custom.length > 0)
+    if (raw.hostname === "auto") {
+      binding.hostname = "auto";
+    } else if (
+      isRecord(raw.hostname) && typeof raw.hostname.custom === "string" &&
+      raw.hostname.custom.length > 0
     ) {
-      binding.hostname = raw.hostname;
+      binding.hostname = { custom: raw.hostname.custom };
     } else {
       issues.push({
         path: `bindings.${name}.hostname`,
@@ -771,12 +790,15 @@ function parseBindingSpecificFields(
       });
     }
     if (raw.tlsMode !== undefined) {
-      if (!tlsModes.has(String(raw.tlsMode))) {
+      const mode = String(raw.tlsMode);
+      if (mode === "auto" || mode === "managed" || mode === "byo") {
+        binding.tlsMode = mode;
+      } else {
         issues.push({
           path: `bindings.${name}.tlsMode`,
           message: "must be auto, managed, or byo",
         });
-      } else binding.tlsMode = raw.tlsMode;
+      }
     }
     binding.tlsCertRef = optionalStringField(
       raw,
@@ -1376,12 +1398,10 @@ async function compileInstallWorkflowRefs(input: {
       entry.workflowRef.file,
       `resources[${entry.index}].workflowRef.file`,
     );
-    const workflow = parseYaml(await Deno.readTextFile(workflowPath));
-    if (!isRecord(workflow) || !Array.isArray(workflow.jobs)) {
-      throw new Error(
-        `workflow file ${workflowPath} is missing a 'jobs' array`,
-      );
-    }
+    const workflow = parseWorkflowFile(
+      parseYaml(await Deno.readTextFile(workflowPath)),
+      `workflow file ${workflowPath}`,
+    );
     const stepStdouts: string[] = [];
     const baseExecutor = executorFactory(input.projectRoot);
     const wrappedExecutor: StepExecutor = async (run, context) => {
@@ -1390,7 +1410,7 @@ async function compileInstallWorkflowRefs(input: {
       return outcome;
     };
     const result = await runWorkflow({
-      file: workflow as unknown as WorkflowFile,
+      file: workflow,
       job: entry.workflowRef.job,
       event: {
         kind: "manual",
@@ -2735,7 +2755,7 @@ function buildInstallDeployRequest(
   }
   return {
     mode: "apply",
-    manifest: manifest as unknown as ManifestEnvelope,
+    manifest: parseManifestEnvelope(manifest),
   };
 }
 
