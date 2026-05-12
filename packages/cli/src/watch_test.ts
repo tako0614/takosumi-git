@@ -1,5 +1,5 @@
 import { assertEquals } from "@std/assert";
-import { resolve } from "@std/path";
+import { join, resolve } from "@std/path";
 import { parseWatchArgs, watchDeployIntentRepo } from "./watch.ts";
 
 Deno.test("watchDeployIntentRepo dispatches push when HEAD changes", async () => {
@@ -95,6 +95,110 @@ Deno.test("watchDeployIntentRepo can run current commit once", async () => {
   assertEquals(result.observedHead, commit);
   assertEquals(result.deployments, [{ commit, status: 202 }]);
   assertEquals(pushed.length, 1);
+});
+
+Deno.test("watchDeployIntentRepo runs workflow push on changed HEAD", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-watch-" });
+  const firstCommit = "1111111111111111111111111111111111111111";
+  const secondCommit = "2222222222222222222222222222222222222222";
+  let headReads = 0;
+  let deploymentBody: Record<string, unknown> | undefined;
+  try {
+    await Deno.mkdir(join(root, ".takosumi", "workflows"), {
+      recursive: true,
+    });
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "manifest.yml"),
+      `apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: watch-fixture
+resources:
+  - shape: web-service@v1
+    name: api
+    provider: container
+    workflowRef:
+      file: build.yml
+      job: build
+      artifact: image
+    spec:
+      image: ghcr.io/example/watch-placeholder@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+`,
+    );
+    await Deno.writeTextFile(
+      join(root, ".takosumi", "workflows", "build.yml"),
+      `version: "0"
+name: build
+jobs:
+  - name: build
+    steps:
+      - name: emit
+        run: echo artifact
+    artifact:
+      name: image
+`,
+    );
+
+    const result = await watchDeployIntentRepo({
+      cwd: root,
+      endpoint: "http://kernel.example",
+      token: "deploy-token",
+      manifestPath: ".takosumi/manifest.yml",
+      workflowsDir: ".takosumi/workflows",
+      mode: "apply",
+      artifactContract: "v1",
+      dryRun: false,
+      pollIntervalMs: 1,
+      once: true,
+      git: (args) => {
+        const key = args.join(" ");
+        if (key === "rev-parse HEAD") {
+          const commit = headReads === 0 ? firstCommit : secondCommit;
+          headReads += 1;
+          return Promise.resolve({ code: 0, stdout: `${commit}\n` });
+        }
+        if (key === "rev-parse --abbrev-ref HEAD") {
+          return Promise.resolve({ code: 0, stdout: "main\n" });
+        }
+        if (key === "config --get remote.origin.url") {
+          return Promise.resolve({
+            code: 0,
+            stdout: "https://git.example.test/deploy.git\n",
+          });
+        }
+        return Promise.resolve({ code: 1, stdout: "" });
+      },
+      executorFactory: () => () =>
+        Promise.resolve({
+          stdout:
+            "TAKOSUMI_ARTIFACT=ghcr.io/example/watch@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n",
+          exitCode: 0,
+        }),
+      fetch: async (input, init) => {
+        deploymentBody = await new Request(input, init).json() as Record<
+          string,
+          unknown
+        >;
+        return Response.json({ ok: true });
+      },
+      sleep: () => Promise.resolve(),
+      stdout: () => {},
+    });
+
+    assertEquals(result.deployments, [{ commit: secondCommit, status: 200 }]);
+    const body = deploymentBody!;
+    assertEquals(body.mode, "apply");
+    const manifest = body.manifest as {
+      resources: Array<{ workflowRef?: unknown; spec: { image: string } }>;
+    };
+    assertEquals(
+      manifest.resources[0].spec.image,
+      "ghcr.io/example/watch@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    );
+    assertEquals("workflowRef" in manifest.resources[0], false);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
 });
 
 Deno.test("parseWatchArgs reads kernel config from env", () => {
