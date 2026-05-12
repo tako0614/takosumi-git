@@ -455,10 +455,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
       `resources[${entry.index}].workflowRef.file`,
     );
     const workflow = await readYaml<WorkflowFile>(workflowPath);
-    if (
-      !isRecord(workflow) ||
-      !Array.isArray((workflow as unknown as { jobs: unknown }).jobs)
-    ) {
+    if (!isRecord(workflow) || !Array.isArray(workflow.jobs)) {
       throw new Error(
         `workflow file ${workflowPath} is missing a 'jobs' array`,
       );

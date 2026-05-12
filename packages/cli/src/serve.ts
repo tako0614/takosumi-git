@@ -266,7 +266,7 @@ class InMemoryWebhookQueue {
   }
 }
 
-function json(body: Record<string, unknown>, status: number): Response {
+function json(body: object, status: number): Response {
   return Response.json(body, { status });
 }
 
@@ -420,7 +420,7 @@ async function handleInstallPreviewRequest(
         sourceRef: ref,
         ...(checkoutSource ? { checkoutSource } : {}),
       });
-      return json(preview as unknown as Record<string, unknown>, 200);
+      return json(preview, 200);
     }
 
     const appYaml = typeof body.appYml === "string"
@@ -445,7 +445,7 @@ async function handleInstallPreviewRequest(
         }
         : {}),
     });
-    return json(preview as unknown as Record<string, unknown>, 200);
+    return json(preview, 200);
   } catch (error) {
     if (error instanceof InstallableAppValidationError) {
       return json({
@@ -569,7 +569,7 @@ async function handleInstallApplyRequest(
       ok: true,
       kind: "takosumi-git.install-apply@v1",
       ...result,
-    } as unknown as Record<string, unknown>, 202);
+    }, 202);
   } catch (error) {
     if (error instanceof InstallableAppValidationError) {
       return json({
@@ -681,7 +681,7 @@ async function handleInstallRevisionRequest(
         ? "takosumi-git.install-revision-apply@v1"
         : "takosumi-git.install-revision-preview@v1",
       ...result,
-    } as unknown as Record<string, unknown>, apply ? 202 : 200);
+    }, apply ? 202 : 200);
   } catch (error) {
     if (error instanceof InstallableAppValidationError) {
       return json({

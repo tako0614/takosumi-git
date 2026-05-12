@@ -1377,10 +1377,7 @@ async function compileInstallWorkflowRefs(input: {
       `resources[${entry.index}].workflowRef.file`,
     );
     const workflow = parseYaml(await Deno.readTextFile(workflowPath));
-    if (
-      !isRecord(workflow) ||
-      !Array.isArray((workflow as unknown as { jobs: unknown }).jobs)
-    ) {
+    if (!isRecord(workflow) || !Array.isArray(workflow.jobs)) {
       throw new Error(
         `workflow file ${workflowPath} is missing a 'jobs' array`,
       );
