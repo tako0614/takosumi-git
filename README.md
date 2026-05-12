@@ -55,10 +55,10 @@ Accounts ledger. `import` reads a JSON AppInstallation export bundle or a
 `tar.zst` archive containing `takos-export/bundle.json` and posts it to Takosumi
 Accounts. `materialize` requests shared-cell to dedicated runtime
 materialization, and `export` requests a self-host bundle operation through
-Takosumi Accounts; `export --output` writes the bundle when Accounts returns a
-completed `downloadUrl`. `history` lists manifest commits and renders
-per-resource semantic diffs. `serve` exposes GitHub / GitLab / Gitea webhook
-routes with signature verification, rate limiting, delivery dedup, queue
+Takosumi Accounts; `export --output` polls the export operation when needed and
+writes the completed `downloadUrl` bundle. `history` lists manifest commits and
+renders per-resource semantic diffs. `serve` exposes GitHub / GitLab / Gitea
+webhook routes with signature verification, rate limiting, delivery dedup, queue
 draining, push dispatch, and install preview/apply HTTP APIs. See
 [AGENTS.md](./AGENTS.md) for package layout and design boundaries.
 

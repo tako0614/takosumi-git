@@ -171,6 +171,10 @@ Deno.test("parseLifecycleArgs reads export options", () => {
     "templates-only",
     "--output",
     "takos-export.tar.zst",
+    "--wait-ms",
+    "2000",
+    "--poll-interval-ms",
+    "25",
     "--accounts-url",
     "http://accounts.example",
   ]);
@@ -186,6 +190,8 @@ Deno.test("parseLifecycleArgs reads export options", () => {
     secrets: "templates-only",
   });
   assertEquals(parsed.export?.outputPath, "takos-export.tar.zst");
+  assertEquals(parsed.export?.waitMs, 2000);
+  assertEquals(parsed.export?.pollIntervalMs, 25);
 });
 
 Deno.test("parseLifecycleArgs requires age recipients", () => {
@@ -315,6 +321,109 @@ Deno.test("runLifecycle downloads completed export bundle output", async () => {
       "http://accounts.example/v1/installations/inst_1/export",
       "https://downloads.example.test/export.tar.zst",
     ]);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("runLifecycle polls pending export before downloading output", async () => {
+  const requests: Request[] = [];
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-export-" });
+  let operationPolls = 0;
+  try {
+    const outputPath = join(root, "takos-export.tar.zst");
+    const result = await runLifecycle({
+      operation: "export",
+      installationId: "inst_1",
+      accountsUrl: "http://accounts.example/",
+      token: "secret",
+      idempotencyKey: "idem-export-poll",
+      json: false,
+      export: {
+        includeData: false,
+        encryption: {
+          method: "none",
+          recipients: [],
+        },
+        scope: {},
+        outputPath,
+        waitMs: 1_000,
+        pollIntervalMs: 0,
+      },
+      fetch: (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        if (
+          request.url ===
+            "http://accounts.example/v1/installations/inst_1/export"
+        ) {
+          return Promise.resolve(Response.json({
+            operationId: "op_export",
+            status: "preparing",
+            trackingUrl:
+              "/v1/installations/inst_1/events?types=installation.export-requested",
+            downloadUrl: null,
+            downloadExpiresAt: null,
+          }, {
+            status: 202,
+            headers: {
+              location: "/v1/installations/inst_1/exports/op_export",
+            },
+          }));
+        }
+        if (
+          request.url ===
+            "http://accounts.example/v1/installations/inst_1/exports/op_export"
+        ) {
+          operationPolls += 1;
+          return Promise.resolve(Response.json({
+            operationId: "op_export",
+            status: operationPolls === 1 ? "preparing" : "exported",
+            trackingUrl:
+              "/v1/installations/inst_1/events?types=installation.export-requested,installation.exported,installation.export-failed",
+            downloadUrl: operationPolls === 1
+              ? null
+              : "https://downloads.example.test/export.tar.zst",
+            downloadExpiresAt: operationPolls === 1
+              ? null
+              : "2999-05-10T00:00:00.000Z",
+          }));
+        }
+        if (request.url === "https://downloads.example.test/export.tar.zst") {
+          return Promise.resolve(
+            new Response(new Uint8Array([4, 5, 6, 7]), {
+              headers: { "content-type": "application/octet-stream" },
+            }),
+          );
+        }
+        return Promise.resolve(Response.json({ error: "unexpected_request" }, {
+          status: 500,
+        }));
+      },
+    });
+
+    assertEquals(result.response.body, {
+      operationId: "op_export",
+      status: "exported",
+      trackingUrl:
+        "/v1/installations/inst_1/events?types=installation.export-requested,installation.exported,installation.export-failed",
+      downloadUrl: "https://downloads.example.test/export.tar.zst",
+      downloadExpiresAt: "2999-05-10T00:00:00.000Z",
+    });
+    assertEquals(result.download, {
+      url: "https://downloads.example.test/export.tar.zst",
+      outputPath,
+      bytes: 4,
+    });
+    assertEquals(await Deno.readFile(outputPath), new Uint8Array([4, 5, 6, 7]));
+    assertEquals(requests.map((request) => request.url), [
+      "http://accounts.example/v1/installations/inst_1/export",
+      "http://accounts.example/v1/installations/inst_1/exports/op_export",
+      "http://accounts.example/v1/installations/inst_1/exports/op_export",
+      "https://downloads.example.test/export.tar.zst",
+    ]);
+    assertEquals(requests[1].headers.get("authorization"), "Bearer secret");
+    assertEquals(requests[2].headers.get("authorization"), "Bearer secret");
   } finally {
     await Deno.remove(root, { recursive: true });
   }

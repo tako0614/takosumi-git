@@ -103,7 +103,9 @@ MATERIALIZE / EXPORT OPTIONS:
   export <id>                  request a pending self-host bundle export
   --accounts-url <url>         Takosumi Accounts URL
   --token <token>              bearer token (or TAKOSUMI_ACCOUNTS_TOKEN/TAKOS_TOKEN)
-  --output <path>              write bundle when export returns downloadUrl
+  --output <path>              poll and write bundle when export returns downloadUrl
+  --wait-ms <n>                max export polling time with --output
+  --poll-interval-ms <n>       export polling interval with --output
   --idempotency-key <key>      idempotency key (default random UUID)
   --json                       print JSON
 

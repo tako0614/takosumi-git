@@ -323,13 +323,14 @@ Takosumi Accounts updates the AppInstallation source pin and appends an
 thin clients for the Takosumi Accounts lifecycle API. Materialize/export request
 the operation and return the operation tracking URL; provider workers complete
 the runtime move or bundle creation asynchronously. When an export response is
-already completed and includes `downloadUrl`, `takosumi-git export --output`
-downloads that bundle to disk. Import reads a JSON AppInstallation export
-bundle, a `tar.zst` archive containing `takos-export/bundle.json`, or an
-age-wrapped `tar.zst.age` archive when `--identity` is supplied, and creates the
-target AppInstallation through Accounts. Archive data entries are metadata-only
-by default; pass `--restore-data` only when the target Accounts instance has an
-import data restorer configured.
+not complete yet, `takosumi-git export --output` follows the operation endpoint
+until it returns `downloadUrl`, then downloads that bundle to disk. Import reads
+a JSON AppInstallation export bundle, a `tar.zst` archive containing
+`takos-export/bundle.json`, or an age-wrapped `tar.zst.age` archive when
+`--identity` is supplied, and creates the target AppInstallation through
+Accounts. Archive data entries are metadata-only by default; pass
+`--restore-data` only when the target Accounts instance has an import data
+restorer configured.
 
 ```bash
 takosumi-git materialize inst_01J... \

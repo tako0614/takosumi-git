@@ -25,6 +25,8 @@ export interface ParsedLifecycleArgs {
     };
     readonly scope: Record<string, unknown>;
     readonly outputPath?: string;
+    readonly waitMs?: number;
+    readonly pollIntervalMs?: number;
   };
 }
 
@@ -118,6 +120,8 @@ export function parseLifecycleArgs(
       "data",
       "secrets",
       "output",
+      "wait-ms",
+      "poll-interval-ms",
     ],
     boolean: ["cost-ack", "include-data", "json"],
     default: {
@@ -189,6 +193,11 @@ export function parseLifecycleArgs(
   if (method === "age" && recipients.length === 0) {
     throw new Error("--recipient is required when --encryption-method age");
   }
+  const waitMs = optionalNonNegativeInteger(flags["wait-ms"], "--wait-ms");
+  const pollIntervalMs = optionalNonNegativeInteger(
+    flags["poll-interval-ms"],
+    "--poll-interval-ms",
+  );
   return {
     ...base,
     export: {
@@ -199,6 +208,8 @@ export function parseLifecycleArgs(
         secrets: flags.secrets,
       }),
       ...(flags.output ? { outputPath: String(flags.output) } : {}),
+      ...(waitMs !== undefined ? { waitMs } : {}),
+      ...(pollIntervalMs !== undefined ? { pollIntervalMs } : {}),
     },
   };
 }
@@ -226,10 +237,23 @@ export async function runLifecycle(
   if (response.status >= 400) {
     throw new LifecycleApplyError(options.operation, response.status, body);
   }
+  const resultBody = options.operation === "export" &&
+      options.export?.outputPath
+    ? await waitForExportDownloadBody({
+      fetch: options.fetch ?? fetch,
+      body,
+      location: response.headers.get("location") ?? undefined,
+      accountsUrl: options.accountsUrl,
+      installationId: options.installationId,
+      token: options.token,
+      waitMs: options.export.waitMs,
+      pollIntervalMs: options.export.pollIntervalMs,
+    })
+    : body;
   const download = options.operation === "export" && options.export?.outputPath
     ? await downloadExportBundle({
       fetch: options.fetch ?? fetch,
-      body,
+      body: resultBody,
       outputPath: options.export.outputPath,
     })
     : undefined;
@@ -238,7 +262,7 @@ export async function runLifecycle(
     request,
     response: {
       status: response.status,
-      body,
+      body: resultBody,
     },
     ...(download ? { download } : {}),
   };
@@ -333,7 +357,9 @@ OPTIONS:
   --recipient <age1...,...>  age recipients when encryption method is age
   --data <name,...>          data scope labels
   --secrets <mode>           secret export scope mode
-  --output <path>            write the bundle when the operation returns downloadUrl
+  --output <path>            write the bundle, polling the export operation if needed
+  --wait-ms <n>              max export polling time with --output (default 30000)
+  --poll-interval-ms <n>     export polling interval with --output (default 1000)
   --idempotency-key <key>    idempotency key (default random UUID)
   --json                     print JSON
 `;
@@ -370,6 +396,108 @@ function objectFromEntries(
     result[key] = value;
   }
   return result;
+}
+
+async function waitForExportDownloadBody(input: {
+  fetch: typeof fetch;
+  body: unknown;
+  location?: string;
+  accountsUrl: string;
+  installationId: string;
+  token?: string;
+  waitMs?: number;
+  pollIntervalMs?: number;
+}): Promise<unknown> {
+  if (hasDownloadUrl(input.body)) return input.body;
+  assertExportNotFailed(input.body);
+
+  const operationUrl = resolveExportOperationUrl({
+    body: input.body,
+    location: input.location,
+    accountsUrl: input.accountsUrl,
+    installationId: input.installationId,
+  });
+  if (!operationUrl) return input.body;
+
+  const waitMs = input.waitMs ?? 30_000;
+  const pollIntervalMs = input.pollIntervalMs ?? 1_000;
+  const deadline = Date.now() + waitMs;
+  let body = input.body;
+  let polled = false;
+  while (true) {
+    if (hasDownloadUrl(body)) return body;
+    assertExportNotFailed(body);
+    if (polled) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        throw new Error(
+          `export did not return a downloadUrl within ${waitMs}ms`,
+        );
+      }
+      await delay(Math.min(pollIntervalMs, remainingMs));
+    }
+    const response = await input.fetch(operationUrl, {
+      headers: {
+        accept: "application/json",
+        ...(input.token ? { authorization: `Bearer ${input.token}` } : {}),
+      },
+    });
+    body = await readResponseBody(response);
+    if (response.status >= 400) {
+      throw new Error(
+        `export operation polling returned HTTP ${response.status}`,
+      );
+    }
+    polled = true;
+  }
+}
+
+function resolveExportOperationUrl(input: {
+  body: unknown;
+  location?: string;
+  accountsUrl: string;
+  installationId: string;
+}): string | undefined {
+  const base = `${normalizeBaseUrl(input.accountsUrl)}/`;
+  const body = isRecord(input.body) ? input.body : {};
+  const candidates = [
+    input.location,
+    stringValue(body.operationUrl),
+    stringValue(body.operation_url),
+  ];
+  const operationId = stringValue(body.operationId);
+  if (operationId) {
+    candidates.push(
+      `/v1/installations/${encodeURIComponent(input.installationId)}/exports/${
+        encodeURIComponent(operationId)
+      }`,
+    );
+  }
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    try {
+      return new URL(candidate, base).toString();
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
+function hasDownloadUrl(body: unknown): boolean {
+  return Boolean(isRecord(body) && stringValue(body.downloadUrl));
+}
+
+function assertExportNotFailed(body: unknown): void {
+  if (!isRecord(body) || body.status !== "failed") return;
+  throw new Error(
+    `export operation failed: ${stringValue(body.error) ?? "unknown error"}`,
+  );
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function downloadExportBundle(input: {
