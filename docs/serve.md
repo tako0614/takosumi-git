@@ -18,14 +18,16 @@ takosumi-git serve \
 
 The server listens on `0.0.0.0:8788` by default and exposes:
 
-| method | path                  | provider / purpose                    |
-| ------ | --------------------- | ------------------------------------- |
-| POST   | `/webhooks/github`    | GitHub push webhook                   |
-| POST   | `/webhooks/gitlab`    | GitLab push webhook                   |
-| POST   | `/webhooks/gitea`     | Gitea push webhook                    |
-| POST   | `/v1/install/preview` | non-mutating app review               |
-| POST   | `/v1/install/apply`   | Accounts-backed install orchestration |
-| GET    | `/health`             | health                                |
+| method | path                           | provider / purpose                                  |
+| ------ | ------------------------------ | --------------------------------------------------- |
+| POST   | `/webhooks/github`             | GitHub push webhook                                 |
+| POST   | `/webhooks/gitlab`             | GitLab push webhook                                 |
+| POST   | `/webhooks/gitea`              | Gitea push webhook                                  |
+| POST   | `/v1/install/preview`          | non-mutating app review                             |
+| POST   | `/v1/install/apply`            | Accounts-backed install orchestration               |
+| POST   | `/v1/install/revision/preview` | existing AppInstallation upgrade / rollback preview |
+| POST   | `/v1/install/revision/apply`   | Accounts-backed upgrade / rollback ledger mutation  |
+| GET    | `/health`                      | health                                              |
 
 ## Signature Verification
 
@@ -107,3 +109,21 @@ Body fields:
 ```
 
 The response kind is `takosumi-git.install-apply@v1`.
+
+`POST /v1/install/revision/preview` and `POST /v1/install/revision/apply` expose
+the same existing-installation source revision flow as `takosumi-git upgrade` /
+`takosumi-git rollback`. Both endpoints require the serve bearer token because
+they read an AppInstallation from Accounts. The apply endpoint also posts the
+revision to Takosumi Accounts.
+
+```json
+{
+  "operation": "upgrade",
+  "installationId": "inst_...",
+  "ref": "v1.2.4"
+}
+```
+
+For rollback, use `"operation": "rollback"` and `"to": "v1.2.3"`. The response
+kinds are `takosumi-git.install-revision-preview@v1` and
+`takosumi-git.install-revision-apply@v1`.

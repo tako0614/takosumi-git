@@ -317,6 +317,20 @@ POST /v1/installations/{installation-id}/rollback
 Takosumi Accounts updates the AppInstallation source pin and appends an
 `installation.upgraded` or `installation.rolled_back` event to the hash chain.
 
+When running `takosumi-git serve`, the same revision flow is available behind
+HTTP for product UIs and operator tools:
+
+```text
+POST /v1/install/revision/preview
+POST /v1/install/revision/apply
+Authorization: Bearer <serve-token>
+```
+
+The request body uses `"operation": "upgrade"` with `"ref": "v1.2.4"`, or
+`"operation": "rollback"` with `"to": "v1.2.3"`. The response kinds are
+`takosumi-git.install-revision-preview@v1` and
+`takosumi-git.install-revision-apply@v1`.
+
 ## Materialize and export
 
 `takosumi-git materialize`, `takosumi-git export`, and `takosumi-git import` are

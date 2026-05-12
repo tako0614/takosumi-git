@@ -62,6 +62,10 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
       "takosumi-git rollback inst_01J",
       "POST /v1/installations/{installation-id}/upgrade",
       "POST /v1/installations/{installation-id}/rollback",
+      "POST /v1/install/revision/preview",
+      "POST /v1/install/revision/apply",
+      "takosumi-git.install-revision-preview@v1",
+      "takosumi-git.install-revision-apply@v1",
       "installation.upgraded",
       "installation.rolled_back",
       "takosumi-git materialize inst_01J",
@@ -130,6 +134,9 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   assert.ok(lifecycleSource.includes("idempotency-key"));
   assert.ok(serveSource.includes("/v1/install/apply"));
   assert.ok(serveSource.includes("handleInstallApplyRequest"));
+  assert.ok(serveSource.includes("/v1/install/revision/preview"));
+  assert.ok(serveSource.includes("/v1/install/revision/apply"));
+  assert.ok(serveSource.includes("handleInstallRevisionRequest"));
 
   assert.ok(mainSource.includes("install     Install .takosumi/app.yml"));
   assert.ok(mainSource.includes("materialize Request shared-cell"));

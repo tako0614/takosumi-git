@@ -638,6 +638,166 @@ Deno.test("serve apply API requires bearer token", async () => {
   assertEquals(response.status, 401);
 });
 
+Deno.test("serve revision API previews and applies existing installation changes", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-serve-revision-",
+  });
+  const requests: Request[] = [];
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi"));
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      APP_YML,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      'apiVersion: "1.0"\nkind: Manifest\nresources: []\n',
+    );
+    const commits = new Map([
+      ["v1.2.4", "1111111111111111111111111111111111111111"],
+      ["v1.2.2", "2222222222222222222222222222222222222222"],
+    ]);
+    const handler = createServeHandler({
+      ...baseOptions(),
+      token: "serve-token",
+      accountsUrl: "http://accounts.example",
+      accountsToken: "accounts-token",
+      installPreviewCheckoutSource: async (request) => {
+        assertEquals(request.gitUrl, "https://github.com/example/hello");
+        const commit = commits.get(request.ref);
+        if (!commit) throw new Error(`unexpected ref ${request.ref}`);
+        await Deno.writeTextFile(
+          join(checkoutRoot, ".takosumi", "app.yml"),
+          APP_YML.replace("ref: v1.2.3", `ref: ${request.ref}`),
+        );
+        return {
+          root: checkoutRoot,
+          commit,
+          cleanup: () => Promise.resolve(),
+        };
+      },
+      installApplyFetch: async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        const url = String(input);
+        if (url.endsWith("/v1/installations/inst_1")) {
+          return Response.json({
+            installation: {
+              id: "inst_1",
+              app_id: "example.hello",
+              source: {
+                url: "https://github.com/example/hello",
+                ref: "v1.2.3",
+                commit: "0000000000000000000000000000000000000000",
+              },
+              app_manifest_digest: "sha256:old-app",
+              compiled_manifest_digest: "sha256:old-manifest",
+              status: "ready",
+            },
+            bindings: [{
+              name: "auth",
+              kind: "identity.oidc@v1",
+            }],
+            grants: [{
+              capability: "logs.read.own",
+              revoked_at: null,
+            }],
+          });
+        }
+        if (url.endsWith("/v1/installations/inst_1/rollback")) {
+          const body = await request.clone().json();
+          return Response.json({
+            operation: "rollback",
+            installation: {
+              id: "inst_1",
+              status: "ready",
+              source: body.source,
+            },
+          });
+        }
+        throw new Error(`Unexpected fetch: ${url}`);
+      },
+    });
+
+    const previewResponse = await handler(
+      new Request("http://localhost/v1/install/revision/preview", {
+        method: "POST",
+        headers: {
+          "authorization": "Bearer serve-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          operation: "upgrade",
+          installationId: "inst_1",
+          ref: "v1.2.4",
+        }),
+      }),
+    );
+
+    assertEquals(previewResponse.status, 200);
+    const previewBody = await previewResponse.json();
+    assertEquals(
+      previewBody.kind,
+      "takosumi-git.install-revision-preview@v1",
+    );
+    assertEquals(previewBody.preview.operation, "upgrade");
+    assertEquals(previewBody.preview.next.source.ref, "v1.2.4");
+    assertEquals(
+      previewBody.preview.next.source.commit,
+      "1111111111111111111111111111111111111111",
+    );
+    assertEquals(requests.length, 1);
+    assertEquals(
+      requests[0].url,
+      "http://accounts.example/v1/installations/inst_1",
+    );
+    assertEquals(
+      requests[0].headers.get("authorization"),
+      "Bearer accounts-token",
+    );
+
+    const applyResponse = await handler(
+      new Request("http://localhost/v1/install/revision/apply", {
+        method: "POST",
+        headers: {
+          "authorization": "Bearer serve-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          operation: "rollback",
+          installationId: "inst_1",
+          to: "v1.2.2",
+          reason: "operator rollback",
+        }),
+      }),
+    );
+
+    assertEquals(applyResponse.status, 202);
+    const applyBody = await applyResponse.json();
+    assertEquals(
+      applyBody.kind,
+      "takosumi-git.install-revision-apply@v1",
+    );
+    assertEquals(applyBody.preview.operation, "rollback");
+    assertEquals(applyBody.response.status, 200);
+    assertEquals(requests.length, 3);
+    assertEquals(
+      requests[2].url,
+      "http://accounts.example/v1/installations/inst_1/rollback",
+    );
+    const rollbackBody = await requests[2].json();
+    assertEquals(rollbackBody.appId, "example.hello");
+    assertEquals(rollbackBody.source.ref, "v1.2.2");
+    assertEquals(
+      rollbackBody.source.commit,
+      "2222222222222222222222222222222222222222",
+    );
+    assertEquals(rollbackBody.reason, "operator rollback");
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
 Deno.test("serve can dispatch webhooks through install apply", async () => {
   const root = await Deno.makeTempDir({
     prefix: "takosumi-git-serve-install-webhook-",

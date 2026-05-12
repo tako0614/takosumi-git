@@ -24,6 +24,7 @@ import {
   parseInstallableAppYaml,
   previewInstall,
 } from "./install.ts";
+import { runRevision } from "./revision.ts";
 
 export type WebhookProvider = "github" | "gitlab" | "gitea";
 export type WebhookMode = "push" | "install";
@@ -307,6 +308,30 @@ export function createServeHandler(
       }
       return await handleInstallApplyRequest(request, options);
     }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/install/revision/preview"
+    ) {
+      if (!limiter.allow(rateLimitKey(request))) {
+        return json({ error: "rate_limited" }, 429);
+      }
+      if (!hasBearerToken(request, options.token)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      return await handleInstallRevisionRequest(request, options, false);
+    }
+    if (
+      request.method === "POST" &&
+      url.pathname === "/v1/install/revision/apply"
+    ) {
+      if (!limiter.allow(rateLimitKey(request))) {
+        return json({ error: "rate_limited" }, 429);
+      }
+      if (!hasBearerToken(request, options.token)) {
+        return json({ error: "unauthorized" }, 401);
+      }
+      return await handleInstallRevisionRequest(request, options, true);
+    }
     if (request.method !== "POST") return json({ error: "not_found" }, 404);
     const provider = providerFromPath(url.pathname);
     if (!provider) return json({ error: "not_found" }, 404);
@@ -564,6 +589,131 @@ async function handleInstallApplyRequest(
       message: error instanceof Error ? error.message : String(error),
     }, 400);
   }
+}
+
+async function handleInstallRevisionRequest(
+  request: Request,
+  options: ServeOptions,
+  apply: boolean,
+): Promise<Response> {
+  if (!options.accountsUrl || !options.accountsToken) {
+    return json({
+      error: "install_revision_not_configured",
+      message:
+        "configure --accounts-url and --accounts-token before using /v1/install/revision/*",
+    }, 503);
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "invalid_json" }, 400);
+  }
+  if (!isRecord(body)) return json({ error: "invalid_json" }, 400);
+
+  try {
+    const operation = parseRevisionOperation(
+      optionalBodyString(body, "operation"),
+    );
+    const installationId = optionalBodyString(
+      body,
+      "installationId",
+      "installation_id",
+    );
+    const targetRef = operation === "upgrade"
+      ? optionalBodyString(body, "ref")
+      : optionalBodyString(body, "to") ?? optionalBodyString(body, "ref");
+    if (!installationId || !targetRef) {
+      return json({
+        error: "invalid_install_revision_request",
+        message: operation === "upgrade"
+          ? "installationId and ref are required"
+          : "installationId and to are required",
+      }, 400);
+    }
+
+    const cwd = Deno.cwd();
+    const appPathSpec = optionalBodyString(body, "appPath", "app_path") ??
+      ".takosumi/app.yml";
+    const manifestPathSpec = optionalBodyString(
+      body,
+      "manifestPath",
+      "manifest_path",
+    );
+    const gitUrl = optionalBodyString(body, "gitUrl", "git_url");
+    const sourceCommit = parseOptionalSourceCommit(
+      optionalBodyString(body, "sourceCommit", "source_commit"),
+    );
+    const reason = optionalBodyString(body, "reason");
+
+    const result = await runRevision({
+      operation,
+      installationId,
+      targetRef,
+      cwd,
+      appPathSpec,
+      appPath: pathFromSpec(cwd, appPathSpec),
+      ...(manifestPathSpec
+        ? {
+          manifestPathSpec,
+          manifestPath: pathFromSpec(cwd, manifestPathSpec),
+        }
+        : {}),
+      accountsUrl: options.accountsUrl,
+      token: options.accountsToken,
+      ...(gitUrl ? { sourceGitUrl: gitUrl } : {}),
+      ...(sourceCommit ? { sourceCommit } : {}),
+      ...(reason ? { reason } : {}),
+      apply,
+      json: true,
+      ...(options.installPreviewCheckoutSource
+        ? { checkoutSource: options.installPreviewCheckoutSource }
+        : {}),
+      ...(options.installApplyFetch
+        ? { fetch: options.installApplyFetch }
+        : {}),
+    });
+
+    return json({
+      ok: true,
+      kind: apply
+        ? "takosumi-git.install-revision-apply@v1"
+        : "takosumi-git.install-revision-preview@v1",
+      ...result,
+    } as unknown as Record<string, unknown>, apply ? 202 : 200);
+  } catch (error) {
+    if (error instanceof InstallableAppValidationError) {
+      return json({
+        error: "invalid_installable_app",
+        issues: error.issues,
+      }, 400);
+    }
+    if (error instanceof Error && error.name === "RevisionApplyError") {
+      const upstream = error as Error & {
+        readonly status?: unknown;
+        readonly body?: unknown;
+      };
+      return json({
+        error: "install_revision_failed",
+        status: typeof upstream.status === "number"
+          ? upstream.status
+          : undefined,
+        body: upstream.body,
+      }, 502);
+    }
+    return json({
+      error: "invalid_install_revision_request",
+      message: error instanceof Error ? error.message : String(error),
+    }, 400);
+  }
+}
+
+function parseRevisionOperation(
+  value: string | undefined,
+): "upgrade" | "rollback" {
+  if (value === "upgrade" || value === "rollback") return value;
+  throw new Error("operation must be upgrade or rollback");
 }
 
 function optionalBodyString(
