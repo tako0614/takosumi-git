@@ -2375,12 +2375,19 @@ export async function applyInstall(
       );
     }
     const launchTokenConfig = appRequiresLaunchTokenConfig(app)
-      ? await fetchLaunchTokenConfig({
-        accountsUrl: options.accountsUrl,
-        token: options.token,
-        installationId,
-        fetch: options.fetch,
-      })
+      ? withResolvedLaunchRedirectUri(
+        await fetchLaunchTokenConfig({
+          accountsUrl: options.accountsUrl,
+          token: options.token,
+          installationId,
+          fetch: options.fetch,
+        }),
+        {
+          runtimeBaseUrl: options.runtimeBaseUrl,
+          postInstallLaunchPath: app.install.postInstallLaunchPath,
+          launchReturnTo: options.launchReturnTo,
+        },
+      )
       : undefined;
     if (launchTokenConfig) {
       accounts = { ...accounts, launchTokenConfig };
@@ -2465,6 +2472,35 @@ function launchRedirectUri(
   const url = new URL(absoluteUrl(runtimeBaseUrl, postInstallLaunchPath));
   if (launchReturnTo) url.searchParams.set("return_to", launchReturnTo);
   return url.toString();
+}
+
+function withResolvedLaunchRedirectUri(
+  config: Record<string, unknown>,
+  input: {
+    readonly runtimeBaseUrl?: string;
+    readonly postInstallLaunchPath: string;
+    readonly launchReturnTo?: string;
+  },
+): Record<string, unknown> {
+  const env = isRecord(config.env) ? { ...config.env } : {};
+  if (!hasNonEmptyEnvKey(env, "INSTALL_LAUNCH_REDIRECT_URI")) {
+    if (!input.runtimeBaseUrl) return { ...config, env };
+    const consumePath = stringProperty(config, "consume_path", "consumePath") ??
+      input.postInstallLaunchPath;
+    const redirectUri = launchRedirectUri(
+      input.runtimeBaseUrl,
+      consumePath,
+      input.launchReturnTo,
+    );
+    env.INSTALL_LAUNCH_REDIRECT_URI = redirectUri;
+    return {
+      ...config,
+      redirect_uri: redirectUri,
+      redirectUri,
+      env,
+    };
+  }
+  return { ...config, env };
 }
 
 async function patchInstallationStatus(input: {

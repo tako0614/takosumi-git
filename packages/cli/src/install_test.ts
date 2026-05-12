@@ -1014,11 +1014,10 @@ resources:
           );
           return Promise.resolve(Response.json({
             url:
-              "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads&token=launch-jws",
-            token: "launch-jws",
+              "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads&launch_token=opaque-launch",
+            token: "opaque-launch",
             expiresAt: "2026-05-12T00:02:00.000Z",
             jti: "lt_1",
-            audience: "example.hello",
           }));
         }
         if (url.includes("/status")) {
@@ -1048,7 +1047,7 @@ resources:
             name: "bootstrap",
             kind: "install-launch-token@v1",
             config_ref:
-              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token",
             secret_refs: [],
           }, {
             name: "database",
@@ -1075,7 +1074,7 @@ resources:
     assertEquals(result.statusTransition?.status, 200);
     assertEquals(
       result.launch?.url,
-      "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads&token=launch-jws",
+      "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads&launch_token=opaque-launch",
     );
     assertEquals(result.accounts.installationId, "inst_1");
     assertEquals(
@@ -1277,7 +1276,7 @@ resources:
             name: "bootstrap",
             kind: "install-launch-token@v1",
             config_ref:
-              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token",
             secret_refs: [],
           }, {
             name: "blob",
@@ -1872,7 +1871,7 @@ Deno.test("applyInstall rejects missing required provider binding materializatio
                 name: "bootstrap",
                 kind: "install-launch-token@v1",
                 config_ref:
-                  "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+                  "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token",
                 secret_refs: [],
               }],
             }, { status: 202 }));
@@ -1944,7 +1943,7 @@ Deno.test("applyInstall rejects missing required opaque launch token env", async
                 name: "bootstrap",
                 kind: "install-launch-token@v1",
                 config_ref:
-                  "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+                  "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token",
                 secret_refs: [],
               }],
             }, { status: 202 }));
@@ -2017,7 +2016,7 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
           name: "bootstrap",
           kind: "install-launch-token@v1",
           config_ref:
-            "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+            "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token",
           secret_refs: [],
         }],
       }, { status: 202 }));

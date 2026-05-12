@@ -58,14 +58,14 @@ compiler will invent values when no materializer supplied them.
 
 ## 0. Catalog 一覧
 
-| # | type identifier                 | domain             | 主担当                                  | required env (default)                                                            |
-| - | ------------------------------- | ------------------ | --------------------------------------- | --------------------------------------------------------------------------------- |
-| 1 | `identity.oidc@v1`              | identity           | Takosumi Accounts (OIDC issuer)         | `OIDC_ISSUER_URL` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI` |
-| 2 | `database.postgres@v1`          | data plane         | takosumi-cloud managed-postgres         | `DATABASE_URL`                                                                    |
-| 3 | `object-store.s3-compatible@v1` | data plane         | takosumi-cloud managed-object-store     | `BLOB_ENDPOINT` / `BLOB_BUCKET` / `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY`           |
-| 4 | `domain.http@v1`                | network            | takosumi-cloud domain manager + DNS     | (env 注入なし。`${bindings.<name>.url}` を manifest 側で参照)                     |
-| 5 | `deploy-intent.gitops@v1`       | deploy bridge      | takosumi-git deploy intent repo         | `DEPLOY_INTENT_DRIVER` / `DEPLOY_INTENT_REMOTE` / `DEPLOY_INTENT_TOKEN`           |
-| 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `ACCOUNTS_BASE_URL` / `INSTALL_LAUNCH_INSTALLATION_ID` / `INSTALL_LAUNCH_REDIRECT_URI` / `INSTALL_LAUNCH_CONSUME_PATH` |
+| # | type identifier                 | domain             | 主担当                                  | required env (default)                                                                                                                                                                                    |
+| - | ------------------------------- | ------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1 | `identity.oidc@v1`              | identity           | Takosumi Accounts (OIDC issuer)         | `OIDC_ISSUER_URL` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI`                                                                                                                         |
+| 2 | `database.postgres@v1`          | data plane         | takosumi-cloud managed-postgres         | `DATABASE_URL`                                                                                                                                                                                            |
+| 3 | `object-store.s3-compatible@v1` | data plane         | takosumi-cloud managed-object-store     | `BLOB_ENDPOINT` / `BLOB_BUCKET` / `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY`                                                                                                                                   |
+| 4 | `domain.http@v1`                | network            | takosumi-cloud domain manager + DNS     | (env 注入なし。`${bindings.<name>.url}` を manifest 側で参照)                                                                                                                                             |
+| 5 | `deploy-intent.gitops@v1`       | deploy bridge      | takosumi-git deploy intent repo         | `DEPLOY_INTENT_DRIVER` / `DEPLOY_INTENT_REMOTE` / `DEPLOY_INTENT_TOKEN`                                                                                                                                   |
+| 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `ACCOUNTS_BASE_URL` / `INSTALL_LAUNCH_INSTALLATION_ID` / `INSTALL_LAUNCH_CONSUME_PATH` (app derives redirect URI locally from `${ACCOUNTS_BASE_URL}` + `${INSTALL_LAUNCH_CONSUME_PATH}` and its own host) |
 
 binding type identifier の文法:
 
@@ -89,14 +89,14 @@ AppInstallation 単位で OIDC client を Takosumi Accounts に登録し、Takos
 
 ### 1.1 Request fields (`.takosumi/app.yml`)
 
-| field                     | required | type            | 説明                                                                       |
-| ------------------------- | -------- | --------------- | -------------------------------------------------------------------------- |
-| `type`                    | yes      | const           | `"identity.oidc@v1"`                                                       |
-| `required`                | no       | boolean         | default `true`                                                             |
-| `redirectPaths`           | yes      | string[] (path) | AppInstallation の base URL に append される。例: `/auth/oidc/callback`    |
-| `allowedScopes`           | no       | string[]        | default `["openid", "email", "profile"]`                                   |
-| `subjectMode`             | no       | const           | `"pairwise"` 固定 (public は採用しない)                                    |
-| `tokenEndpointAuthMethod` | no       | enum            | `client_secret_basic` (default) / `client_secret_post` / `private_key_jwt` (future option、 現行 Accounts は未実装) |
+| field                     | required | type            | 説明                                                                            |
+| ------------------------- | -------- | --------------- | ------------------------------------------------------------------------------- |
+| `type`                    | yes      | const           | `"identity.oidc@v1"`                                                            |
+| `required`                | no       | boolean         | default `true`                                                                  |
+| `redirectPaths`           | yes      | string[] (path) | AppInstallation の base URL に append される。例: `/auth/oidc/callback`         |
+| `allowedScopes`           | no       | string[]        | default `["openid", "email", "profile"]`                                        |
+| `subjectMode`             | no       | const           | `"pairwise"` 固定 (public は採用しない)                                         |
+| `tokenEndpointAuthMethod` | no       | enum            | `client_secret_post` (default) / `client_secret_basic` / `none` (public client) |
 
 ### 1.2 Provisioned config
 
@@ -428,14 +428,19 @@ placeholder を含めない。GPU / accelerator 指定、または `instances` /
 
 install 完了直後の自動 sign-in 用
 [opaque launch token](../../../takosumi-cloud/docs/apps/launch-token.md) を
-**redeem する側 (= app)** に必要な Accounts endpoint と redirect URI を提供する binding。
+**redeem する側 (= app)** に必要な Accounts endpoint と redirect URI を提供する
+binding。
 
 実 token 発行は Takosumi Accounts (`POST /v1/installations/{id}/launch-token`、
-[Install API](../../../takosumi-cloud/docs/accounts-service.md#launch-token)) が担い、 本 binding は **app が redeem に
-必要な context (Accounts base URL / installationId / redirect URI / consume path) の注入のみ** を担当する。
+[Install API](../../../takosumi-cloud/docs/accounts-service.md#launch-token))
+が担い、 本 binding は **app が redeem に 必要な context (Accounts base URL /
+installationId / redirect URI / consume path) の注入のみ** を担当する。redirect
+URI は installer が runtime base URL と consume path から算出し、token
+発行時にも同じ値を Accounts に渡す。
 
-token は opaque random (32-byte) で、 app は JWS verify をしない。 app は Accounts の `/consume` endpoint を TLS で
-呼んで redeem する (OAuth 2.0 authorization code grant 相当)。
+token は opaque random (32-byte) で、 app は JWS verify をしない。 app は
+Accounts の `/consume` endpoint を TLS で 呼んで redeem する (OAuth 2.0
+authorization code grant 相当)。
 
 ### 6.1 Request fields
 
@@ -448,39 +453,56 @@ token は opaque random (32-byte) で、 app は JWS verify をしない。 app 
 
 ### 6.2 Provisioned config
 
-| field                | 説明                                                                                  |
-| -------------------- | ------------------------------------------------------------------------------------- |
-| `accountsBaseUrl`    | target Takosumi Accounts の base URL (`/consume` endpoint の prefix)                  |
-| `installationId`     | この AppInstallation の id (consume path に embed)                                    |
-| `redirectUri`        | Accounts が token 発行時に bind する redirect URI (=`<app-base>/<consumePath>`)       |
-| `consumePath`        | request の `consumePath` を継承 (default `/_takosumi/launch`)                         |
-| `maxLifetimeSeconds` | 上限 lifetime                                                                         |
+| field                | 説明                                                                 |
+| -------------------- | -------------------------------------------------------------------- |
+| `accountsBaseUrl`    | target Takosumi Accounts の base URL (`/consume` endpoint の prefix) |
+| `installationId`     | この AppInstallation の id (consume path に embed)                   |
+| `consumePath`        | request の `consumePath` を継承 (default `/_takosumi/launch`)        |
+| `maxLifetimeSeconds` | 上限 lifetime                                                        |
 
 secret schema は **空** (公開鍵 / 署名鍵は使わない、 opaque token model)。
 
-現行 Takosumi Accounts は `POST /v1/installations` 時にこの binding の発行設定を ledger に記録し、 install 完了
-タイミングで opaque token を発行し redirect URL に carry する。
+注: redirect URI は binding が保持しません。 Accounts は token issue request
+(`POST /v1/installations/{id}/launch-token`) の `redirect_uri` field を
+**per-call** で受け取り、 issued token に bind します。 takosumi-git installer
+は自身が知っている app の runtime base URL と `${INSTALL_LAUNCH_CONSUME_PATH}`
+から redirect URI を組み立てて issue request に渡し、 app 側も同じ redirect URI
+を consume request に送ります。
+
+現行 Takosumi Accounts は `POST /v1/installations` 時にこの binding の発行設定を
+ledger に記録し、 install 完了 タイミングで opaque token を発行し redirect URL
+に carry する。
 
 ### 6.3 Output placeholders
 
-| placeholder                          | 値                                       |
-| ------------------------------------ | ---------------------------------------- |
-| `${bindings.<name>.accountsBaseUrl}` | Accounts base URL                        |
-| `${bindings.<name>.installationId}`  | AppInstallation id (`inst_xxx`)          |
-| `${bindings.<name>.redirectUri}`     | bound redirect URI (absolute)            |
-| `${bindings.<name>.consumePath}`     | consume endpoint path                    |
+| placeholder                          | 値                              |
+| ------------------------------------ | ------------------------------- |
+| `${bindings.<name>.accountsBaseUrl}` | Accounts base URL               |
+| `${bindings.<name>.installationId}`  | AppInstallation id (`inst_xxx`) |
+| `${bindings.<name>.consumePath}`     | consume endpoint path           |
+
+redirect URI は binding output に含まれません。 app は実行時に自身の host
+(`${bindings.domain.url}` 等) と `${bindings.<name>.consumePath}`
+から組み立てます。
 
 ### 6.4 Default env injection
 
 ```env
 ACCOUNTS_BASE_URL              = ${bindings.<name>.accountsBaseUrl}
 INSTALL_LAUNCH_INSTALLATION_ID = ${bindings.<name>.installationId}
-INSTALL_LAUNCH_REDIRECT_URI    = ${bindings.<name>.redirectUri}
 INSTALL_LAUNCH_CONSUME_PATH    = ${bindings.<name>.consumePath}
 ```
 
-app は handler で `POST ${ACCOUNTS_BASE_URL}/v1/installations/${INSTALL_LAUNCH_INSTALLATION_ID}/launch-token/consume` を
-叩いて redeem する。 詳細は [launch-token.md § 6](../../../takosumi-cloud/docs/apps/launch-token.md#6-app-側の実装-consume_path-handler)。
+`INSTALL_LAUNCH_REDIRECT_URI` は binding が注入しません。 app は handler
+内で自身の host (または `${bindings.domain.url}` から派生した `BASE_URL`) と
+`INSTALL_LAUNCH_CONSUME_PATH` から redirect URI を 組み立て、 consume request
+に同値を渡します。 installer 側 (takosumi-git) は issue request
+に同じ計算結果を渡します。
+
+app は handler で
+`POST ${ACCOUNTS_BASE_URL}/v1/installations/${INSTALL_LAUNCH_INSTALLATION_ID}/launch-token/consume`
+を 叩いて redeem する。 詳細は
+[launch-token.md § 6](../../../takosumi-cloud/docs/apps/launch-token.md#6-app-側の実装-consume_path-handler)。
 
 ### 6.5 例
 
@@ -493,18 +515,15 @@ bindings:
     maxLifetimeSeconds: 300
 ```
 
-### 6.6 Migration from JWS (legacy)
+### 6.6 Retired JWS model
 
-v0 の binding は JWS verify 用に `INSTALL_LAUNCH_PUBLIC_KEY` / `INSTALL_LAUNCH_AUDIENCE` / `INSTALL_LAUNCH_ISSUER` を
-注入する model だった。 v1 で opaque token + TLS redeem に整理された。
+v0 の binding は JWS verify 用に `INSTALL_LAUNCH_PUBLIC_KEY` /
+`INSTALL_LAUNCH_AUDIENCE` / `INSTALL_LAUNCH_ISSUER` を 注入する model だった。
+v1 で opaque token + TLS redeem に整理された。
 
-旧 env は deprecation window 中は併存。 app は次の順で fallback できる:
-
-1. `ACCOUNTS_BASE_URL` がある場合 → opaque token model で redeem
-2. `INSTALL_LAUNCH_PUBLIC_KEY` がある場合 → legacy JWS verify (deprecated、 将来削除)
-
-完全 cutover は
-[install-lifecycle-roadmap](../../../takosumi-cloud/docs/install-lifecycle-roadmap.md) を参照。
+current contract は clean cut で、`INSTALL_LAUNCH_PUBLIC_KEY` 系 env / local JWS
+verify / query `token` fallback を 受け付けない。 app は `launch_token=<opaque>`
+を受け取り、`ACCOUNTS_BASE_URL` の `/consume` endpoint へ redeem する。
 
 ## 7. Namespace exports are not AppBinding kinds
 
@@ -620,7 +639,6 @@ resources:
         TAKOS_INSTALLATION_ID: "${installation.id}"
         ACCOUNTS_BASE_URL: "${bindings.bootstrap.accountsBaseUrl}"
         INSTALL_LAUNCH_INSTALLATION_ID: "${bindings.bootstrap.installationId}"
-        INSTALL_LAUNCH_REDIRECT_URI: "${bindings.bootstrap.redirectUri}"
         INSTALL_LAUNCH_CONSUME_PATH: "${bindings.bootstrap.consumePath}"
 ```
 

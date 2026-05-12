@@ -134,8 +134,8 @@ runtime:
 | --------------- | ---- | ---------------------------------------------------------------------------------------- |
 | `runtime.modes` | ✅   | string array、1〜3 要素。値は `shared-cell` / `dedicated` / `self-hosted` のみ。重複禁止 |
 
-- `shared-cell` を含む app のみが managed shared-cell install、または Use Takos で作成された Space への bundled
-  auto-install 対象になれます
+- `shared-cell` を含む app のみが managed shared-cell install、または Use Takos
+  で作成された Space への bundled auto-install 対象になれます
 - `self-hosted` を含まない app は Export bundle 経由でも別 takosumi に restore
   できません
 
@@ -240,7 +240,7 @@ install:
 | `install.postInstallLaunchPath` | ✅   | `/` 始まり path、1〜200 char。Launch token を query で受け、owner session を作る endpoint       |
 
 `postInstallLaunchPath` の URL は Takosumi Accounts が
-`https://<installation host>/<postInstallLaunchPath>?token=...` の形に
+`https://<installation host>/<postInstallLaunchPath>?launch_token=...` の形に
 組み立てます。query は installer / accounts が動的に付与するため、両 path とも
 query を含めません。詳細は
 [Launch Token](../../../takosumi-cloud/docs/apps/launch-token.md)

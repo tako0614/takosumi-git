@@ -366,8 +366,9 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
           request.method === "POST"
         ) {
           return Promise.resolve(Response.json({
-            url: "https://hello.example.test/_takosumi/launch?token=launch-jws",
-            token: "launch-jws",
+            url:
+              "https://hello.example.test/_takosumi/launch?launch_token=opaque-launch",
+            token: "opaque-launch",
           }));
         }
         return Promise.resolve(Response.json({
@@ -376,7 +377,7 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
             name: "bootstrap",
             kind: "install-launch-token@v1",
             config_ref:
-              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token/launch-test",
+              "takosumi-accounts://installations/inst_1/bindings/bootstrap/launch-token",
             secret_refs: [],
           }],
         }, { status: 202 }));
@@ -407,7 +408,7 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
     assertEquals(body.accounts.installationId, "inst_1");
     assertEquals(
       body.launch.url,
-      "https://hello.example.test/_takosumi/launch?token=launch-jws",
+      "https://hello.example.test/_takosumi/launch?launch_token=opaque-launch",
     );
     assertEquals(requests.length, 5);
     assertEquals(requests[0].url, "http://accounts.example/v1/installations");
@@ -528,8 +529,9 @@ Deno.test("serve completes Git URL preview approval to ready AppInstallation wit
           request.method === "POST"
         ) {
           return Response.json({
-            url: "https://hello.example.test/_takosumi/launch?token=launch-jws",
-            token: "launch-jws",
+            url:
+              "https://hello.example.test/_takosumi/launch?launch_token=opaque-launch",
+            token: "opaque-launch",
           });
         }
         return Response.json({
@@ -538,7 +540,7 @@ Deno.test("serve completes Git URL preview approval to ready AppInstallation wit
             name: "bootstrap",
             kind: "install-launch-token@v1",
             config_ref:
-              "takosumi-accounts://installations/inst_approval/bindings/bootstrap/launch-token/launch-test",
+              "takosumi-accounts://installations/inst_approval/bindings/bootstrap/launch-token",
             secret_refs: [],
           }],
         }, { status: 202 });
