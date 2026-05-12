@@ -139,6 +139,7 @@ WATCH OPTIONS:
   --token <token>              bearer token (or TAKOSUMI_TOKEN)
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
+  --intent-path-prefix <path>  deploy intent JSON directory (default deployments)
   --artifact-contract <v0|v1|auto>
                                artifact URI resolver (default v1)
   --poll-interval-ms <n>       git HEAD poll interval (default 5000)

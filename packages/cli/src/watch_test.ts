@@ -97,6 +97,105 @@ Deno.test("watchDeployIntentRepo can run current commit once", async () => {
   assertEquals(pushed.length, 1);
 });
 
+Deno.test("watchDeployIntentRepo dispatches latest deploy intent document", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-intent-" });
+  const commits = [
+    "dddddddddddddddddddddddddddddddddddddddd",
+    "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  ];
+  let headReads = 0;
+  let deploymentRequest: unknown;
+  let idempotencyKey: string | undefined;
+  const stdout: string[] = [];
+  try {
+    await Deno.mkdir(join(root, "deployments"), { recursive: true });
+    await Deno.writeTextFile(
+      join(root, "deployments", "intent-1.json"),
+      JSON.stringify({
+        kind: "takos.deploy-intent@v1",
+        id: "intent-1",
+        manifest: { apiVersion: "1.0", kind: "Manifest", resources: [] },
+      }),
+    );
+    await Deno.writeTextFile(
+      join(root, "deployments", "intent-2.json"),
+      JSON.stringify({
+        kind: "takos.deploy-intent@v1",
+        id: "intent-2",
+        mode: "plan",
+        manifest: {
+          apiVersion: "1.0",
+          kind: "Manifest",
+          resources: [{
+            shape: "web-service@v1",
+            name: "api",
+            provider: "container",
+            spec: { image: "ghcr.io/example/api@sha256:aaaa" },
+          }],
+        },
+      }),
+    );
+
+    const result = await watchDeployIntentRepo({
+      cwd: root,
+      endpoint: "http://kernel.example",
+      token: "deploy-token",
+      manifestPath: ".takosumi/manifest.yml",
+      workflowsDir: ".takosumi/workflows",
+      intentPathPrefix: "deployments",
+      mode: "apply",
+      artifactContract: "v1",
+      dryRun: false,
+      pollIntervalMs: 1,
+      once: true,
+      git: () => {
+        const commit = commits[Math.min(headReads, commits.length - 1)];
+        headReads += 1;
+        return Promise.resolve({ code: 0, stdout: `${commit}\n` });
+      },
+      sleep: () => Promise.resolve(),
+      stdout: (line) => stdout.push(line),
+      pushImpl: () => {
+        throw new Error("pushImpl must not run for deploy intent documents");
+      },
+      postDeploymentImpl: (options, request) => {
+        idempotencyKey = options.idempotencyKey;
+        deploymentRequest = request;
+        return Promise.resolve({
+          status: 202,
+          body: { ok: true },
+          attempts: 1,
+          idempotencyKey: options.idempotencyKey ?? "generated",
+        });
+      },
+    });
+
+    assertEquals(result.deployments, [{ commit: commits[1], status: 202 }]);
+    assertEquals(idempotencyKey, `takosumi-git-watch-${commits[1]}`);
+    assertEquals(deploymentRequest, {
+      mode: "plan",
+      manifest: {
+        apiVersion: "1.0",
+        kind: "Manifest",
+        resources: [{
+          shape: "web-service@v1",
+          name: "api",
+          provider: "container",
+          spec: { image: "ghcr.io/example/api@sha256:aaaa" },
+        }],
+      },
+    });
+    assertEquals(
+      stdout.includes(
+        "takosumi-git watch: dispatching deploy intent intent-2\n",
+      ),
+      true,
+    );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
 Deno.test("watchDeployIntentRepo runs workflow push on changed HEAD", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-watch-" });
   const firstCommit = "1111111111111111111111111111111111111111";
@@ -216,6 +315,7 @@ Deno.test("parseWatchArgs reads kernel config from env", () => {
       const values: Record<string, string> = {
         TAKOSUMI_ENDPOINT: "http://kernel.example",
         TAKOSUMI_TOKEN: "deploy-token",
+        DEPLOY_INTENT_WRITE_PATH_PREFIX: "apps/takos",
       };
       return values[key];
     },
@@ -228,6 +328,7 @@ Deno.test("parseWatchArgs reads kernel config from env", () => {
   assertEquals(parsed.runCurrent, true);
   assertEquals(parsed.pollIntervalMs, 250);
   assertEquals(parsed.artifactContract, "auto");
+  assertEquals(parsed.intentPathPrefix, "apps/takos");
 });
 
 Deno.test("parseWatchArgs requires deploy config unless dry-run", () => {

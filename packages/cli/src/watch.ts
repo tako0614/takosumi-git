@@ -1,6 +1,10 @@
 import { parseArgs } from "@std/cli/parse-args";
-import { isAbsolute, resolve } from "@std/path";
-import type { DeployMode } from "@takos/takosumi-git-deploy-client";
+import { isAbsolute, join, resolve } from "@std/path";
+import {
+  type DeployMode,
+  type ManifestEnvelope,
+  postDeployment,
+} from "@takos/takosumi-git-deploy-client";
 import type { StepExecutor } from "@takos/takosumi-git-workflow-runner";
 import {
   type ArtifactContract,
@@ -13,6 +17,7 @@ import {
 
 const DEFAULT_MANIFEST = ".takosumi/manifest.yml";
 const DEFAULT_WORKFLOWS_DIR = ".takosumi/workflows";
+const DEFAULT_INTENT_PATH_PREFIX = "deployments";
 const DEFAULT_POLL_INTERVAL_MS = 5_000;
 
 export interface WatchOptions {
@@ -21,6 +26,7 @@ export interface WatchOptions {
   readonly token: string;
   readonly manifestPath: string;
   readonly workflowsDir: string;
+  readonly intentPathPrefix?: string;
   readonly mode: DeployMode;
   readonly artifactContract: ArtifactContract;
   readonly dryRun: boolean;
@@ -32,6 +38,7 @@ export interface WatchOptions {
   readonly executorFactory?: (workflowDir: string) => StepExecutor;
   readonly git?: GitRunner;
   readonly pushImpl?: (options: PushOptions) => Promise<PushResult>;
+  readonly postDeploymentImpl?: typeof postDeployment;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly stdout?: (text: string) => void;
 }
@@ -50,6 +57,7 @@ export interface ParsedWatchArgs {
   readonly token: string;
   readonly manifestPath: string;
   readonly workflowsDir: string;
+  readonly intentPathPrefix: string;
   readonly mode: DeployMode;
   readonly artifactContract: ArtifactContract;
   readonly dryRun: boolean;
@@ -64,6 +72,7 @@ export async function watchDeployIntentRepo(
   const cwd = resolve(options.cwd);
   const git = options.git ?? defaultGitRunner;
   const pushImpl = options.pushImpl ?? push;
+  const postDeploymentImpl = options.postDeploymentImpl ?? postDeployment;
   const sleep = options.sleep ?? delay;
   const stdout = options.stdout ?? ((text: string) => {
     Deno.stdout.writeSync(new TextEncoder().encode(text));
@@ -78,6 +87,7 @@ export async function watchDeployIntentRepo(
         cwd,
         commit: observedHead,
         pushImpl,
+        postDeploymentImpl,
         stdout,
       }),
     );
@@ -96,6 +106,7 @@ export async function watchDeployIntentRepo(
         cwd,
         commit: head,
         pushImpl,
+        postDeploymentImpl,
         stdout,
       }),
     );
@@ -110,9 +121,43 @@ async function dispatchPush(input: {
   cwd: string;
   commit: string;
   pushImpl: (options: PushOptions) => Promise<PushResult>;
+  postDeploymentImpl: typeof postDeployment;
   stdout: (text: string) => void;
 }): Promise<{ commit: string; status?: number }> {
   input.stdout(`takosumi-git watch: detected commit ${input.commit}\n`);
+  const intent = await readLatestDeployIntent(
+    join(
+      input.cwd,
+      input.options.intentPathPrefix ?? DEFAULT_INTENT_PATH_PREFIX,
+    ),
+  );
+  if (intent) {
+    input.stdout(
+      `takosumi-git watch: dispatching deploy intent ${intent.id}\n`,
+    );
+    if (input.options.dryRun) {
+      input.stdout(
+        `${
+          JSON.stringify(
+            { mode: intent.mode, manifest: intent.manifest },
+            null,
+            2,
+          )
+        }\n`,
+      );
+      return { commit: input.commit };
+    }
+    const result = await input.postDeploymentImpl({
+      endpoint: input.options.endpoint,
+      token: input.options.token,
+      fetch: input.options.fetch,
+      idempotencyKey: `takosumi-git-watch-${input.commit}`,
+    }, {
+      mode: intent.mode,
+      manifest: intent.manifest,
+    });
+    return { commit: input.commit, status: result.status };
+  }
   const result = await input.pushImpl({
     endpoint: input.options.endpoint,
     token: input.options.token,
@@ -139,6 +184,67 @@ async function dispatchPush(input: {
 
 function absoluteFromCwd(cwd: string, path: string): string {
   return isAbsolute(path) ? path : resolve(cwd, path);
+}
+
+interface DeployIntentDocument {
+  readonly id: string;
+  readonly mode: DeployMode;
+  readonly manifest: ManifestEnvelope;
+}
+
+async function readLatestDeployIntent(
+  directory: string,
+): Promise<DeployIntentDocument | null> {
+  let latest: { path: string; name: string; mtime: number } | null = null;
+  try {
+    for await (const entry of Deno.readDir(directory)) {
+      if (!entry.isFile || !entry.name.endsWith(".json")) continue;
+      const path = join(directory, entry.name);
+      const stat = await Deno.stat(path);
+      const mtime = stat.mtime?.getTime() ?? 0;
+      if (
+        !latest || mtime > latest.mtime ||
+        (mtime === latest.mtime && entry.name > latest.name)
+      ) {
+        latest = { path, name: entry.name, mtime };
+      }
+    }
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) return null;
+    throw error;
+  }
+  if (!latest) return null;
+  return parseDeployIntentDocument(await Deno.readTextFile(latest.path));
+}
+
+function parseDeployIntentDocument(text: string): DeployIntentDocument {
+  const value = JSON.parse(text) as unknown;
+  if (!isRecord(value) || value.kind !== "takos.deploy-intent@v1") {
+    throw new Error(
+      "deploy intent document must have kind takos.deploy-intent@v1",
+    );
+  }
+  if (typeof value.id !== "string" || value.id.length === 0) {
+    throw new Error("deploy intent document id is required");
+  }
+  const mode = typeof value.mode === "string" ? value.mode : "apply";
+  if (mode !== "apply" && mode !== "plan" && mode !== "destroy") {
+    throw new Error(
+      `deploy intent mode must be one of apply|plan|destroy (got '${mode}')`,
+    );
+  }
+  if (!isRecord(value.manifest)) {
+    throw new Error("deploy intent document manifest must be an object");
+  }
+  return {
+    id: value.id,
+    mode,
+    manifest: value.manifest as unknown as ManifestEnvelope,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 async function currentHead(input: {
@@ -185,6 +291,7 @@ export function parseWatchArgs(
       "token",
       "manifest",
       "workflows-dir",
+      "intent-path-prefix",
       "mode",
       "artifact-contract",
       "poll-interval-ms",
@@ -231,6 +338,8 @@ export function parseWatchArgs(
     token,
     manifestPath: flags.manifest as string,
     workflowsDir: flags["workflows-dir"] as string,
+    intentPathPrefix: (flags["intent-path-prefix"] as string | undefined) ??
+      env.get("DEPLOY_INTENT_WRITE_PATH_PREFIX") ?? DEFAULT_INTENT_PATH_PREFIX,
     mode,
     artifactContract: parseArtifactContract(flags["artifact-contract"]),
     dryRun,
