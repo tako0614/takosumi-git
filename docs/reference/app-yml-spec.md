@@ -134,7 +134,8 @@ runtime:
 | --------------- | ---- | ---------------------------------------------------------------------------------------- |
 | `runtime.modes` | ✅   | string array、1〜3 要素。値は `shared-cell` / `dedicated` / `self-hosted` のみ。重複禁止 |
 
-- `shared-cell` を含む app のみが Use Takos path で install 可能です
+- `shared-cell` を含む app のみが managed shared-cell install、または Use Takos で作成された Space への bundled
+  auto-install 対象になれます
 - `self-hosted` を含まない app は Export bundle 経由でも別 takosumi に restore
   できません
 
