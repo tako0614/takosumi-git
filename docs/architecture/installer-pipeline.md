@@ -5,7 +5,10 @@
 で走らせて artifact を build し、Takosumi Accounts install API に AppBinding /
 AppGrant / namespace export materialization を依頼し、 `.takosumi/manifest.yml`
 から compiled Shape manifest を生成し、必要なら takosumi kernel の
-`POST /v1/deployments` に投下する。本ページは takosumi-git が所有する
+`POST /v1/deployments` に投下する。AppInstallation ledger の作成・遷移は
+Takosumi Accounts の install API に委譲し、takosumi-git 自身は Accounts install
+request と kernel deploy request の双方を発行する thin client であって
+deployment lifecycle の owner ではない。本ページは takosumi-git が所有する
 orchestration step / CLI / sandbox / pin / publisher verification
 を集約する。AppInstallation ledger と status transition の正本は Takosumi
 Accounts です。
