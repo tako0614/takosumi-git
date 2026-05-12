@@ -65,7 +65,7 @@ compiler will invent values when no materializer supplied them.
 | 3 | `object-store.s3-compatible@v1` | data plane         | takosumi-cloud managed-object-store     | `BLOB_ENDPOINT` / `BLOB_BUCKET` / `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY`           |
 | 4 | `domain.http@v1`                | network            | takosumi-cloud domain manager + DNS     | (env 注入なし。`${bindings.<name>.url}` を manifest 側で参照)                     |
 | 5 | `deploy-intent.gitops@v1`       | deploy bridge      | takosumi-git deploy intent repo         | `DEPLOY_INTENT_DRIVER` / `DEPLOY_INTENT_REMOTE` / `DEPLOY_INTENT_TOKEN`           |
-| 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `INSTALL_LAUNCH_PUBLIC_KEY` / `INSTALL_LAUNCH_AUDIENCE` / `INSTALL_LAUNCH_ISSUER` |
+| 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `ACCOUNTS_BASE_URL` / `INSTALL_LAUNCH_INSTALLATION_ID` / `INSTALL_LAUNCH_REDIRECT_URI` / `INSTALL_LAUNCH_CONSUME_PATH` |
 
 binding type identifier の文法:
 
@@ -427,13 +427,15 @@ placeholder を含めない。GPU / accelerator 指定、または `instances` /
 ## 6. `install-launch-token@v1`
 
 install 完了直後の自動 sign-in 用
-[launch token JWS](../../../takosumi-cloud/docs/apps/launch-token.md) を
-**検証する側 (= app)** に必要な公開鍵 / audience を提供する binding。
+[opaque launch token](../../../takosumi-cloud/docs/apps/launch-token.md) を
+**redeem する側 (= app)** に必要な Accounts endpoint と redirect URI を提供する binding。
 
-実際の token 発行は Takosumi Accounts
-(`POST /v1/installations/{id}/launch-token`、
-[Install API](../../../takosumi-cloud/docs/accounts-service.md#launch-token)
-参照) が担い、本 binding は **検証材料の注入のみ**を担当する。
+実 token 発行は Takosumi Accounts (`POST /v1/installations/{id}/launch-token`、
+[Install API](../../../takosumi-cloud/docs/accounts-service.md#launch-token)) が担い、 本 binding は **app が redeem に
+必要な context (Accounts base URL / installationId / redirect URI / consume path) の注入のみ** を担当する。
+
+token は opaque random (32-byte) で、 app は JWS verify をしない。 app は Accounts の `/consume` endpoint を TLS で
+呼んで redeem する (OAuth 2.0 authorization code grant 相当)。
 
 ### 6.1 Request fields
 
@@ -446,43 +448,39 @@ install 完了直後の自動 sign-in 用
 
 ### 6.2 Provisioned config
 
-| field                | 説明                                                                                                  |
-| -------------------- | ----------------------------------------------------------------------------------------------------- |
-| `audience`           | JWS aud claim。通常は `appId` (例: `example.notes`)                                                   |
-| `issuer`             | target Takosumi Accounts が materialize する launch token issuer URL                                  |
-| `publicKey`          | target Accounts が発行する JWKS JSON。export bundle の source key は active config として再利用しない |
-| `algorithm`          | 現行 Accounts issuer は `RS256`                                                                       |
-| `kid`                | target Accounts が発行する key id                                                                     |
-| `consumePath`        | request の `consumePath` を継承                                                                       |
-| `maxLifetimeSeconds` | 上限 lifetime                                                                                         |
+| field                | 説明                                                                                  |
+| -------------------- | ------------------------------------------------------------------------------------- |
+| `accountsBaseUrl`    | target Takosumi Accounts の base URL (`/consume` endpoint の prefix)                  |
+| `installationId`     | この AppInstallation の id (consume path に embed)                                    |
+| `redirectUri`        | Accounts が token 発行時に bind する redirect URI (=`<app-base>/<consumePath>`)       |
+| `consumePath`        | request の `consumePath` を継承 (default `/_takosumi/launch`)                         |
+| `maxLifetimeSeconds` | 上限 lifetime                                                                         |
 
-token 発行側の **private key は本 binding には含めない** (Takosumi Accounts
-内部に保持)。secret schema は **空** (本 binding は public key と audience の
-みを扱う)。
+secret schema は **空** (公開鍵 / 署名鍵は使わない、 opaque token model)。
 
-現行 Takosumi Accounts は `POST /v1/installations` 時にこの binding を
-`takosumi-accounts://.../launch-token/<kid>` config ref へ materialize し、
-`GET /v1/installations/{id}/launch-token` で `INSTALL_LAUNCH_*` にそのまま
-注入できる public config を返す。
+現行 Takosumi Accounts は `POST /v1/installations` 時にこの binding の発行設定を ledger に記録し、 install 完了
+タイミングで opaque token を発行し redirect URL に carry する。
 
 ### 6.3 Output placeholders
 
-| placeholder                      | 値                                  |
-| -------------------------------- | ----------------------------------- |
-| `${bindings.<name>.publicKey}`   | JWKS JSON / PEM pubkey              |
-| `${bindings.<name>.audience}`    | aud 値                              |
-| `${bindings.<name>.issuer}`      | issuer URL                          |
-| `${bindings.<name>.algorithm}`   | `RS256` (EdDSA は future extension) |
-| `${bindings.<name>.kid}`         | key id                              |
-| `${bindings.<name>.consumePath}` | consume endpoint path               |
+| placeholder                          | 値                                       |
+| ------------------------------------ | ---------------------------------------- |
+| `${bindings.<name>.accountsBaseUrl}` | Accounts base URL                        |
+| `${bindings.<name>.installationId}`  | AppInstallation id (`inst_xxx`)          |
+| `${bindings.<name>.redirectUri}`     | bound redirect URI (absolute)            |
+| `${bindings.<name>.consumePath}`     | consume endpoint path                    |
 
 ### 6.4 Default env injection
 
 ```env
-INSTALL_LAUNCH_PUBLIC_KEY = ${bindings.<name>.publicKey}
-INSTALL_LAUNCH_AUDIENCE   = ${bindings.<name>.audience}
-INSTALL_LAUNCH_ISSUER     = ${bindings.<name>.issuer}
+ACCOUNTS_BASE_URL              = ${bindings.<name>.accountsBaseUrl}
+INSTALL_LAUNCH_INSTALLATION_ID = ${bindings.<name>.installationId}
+INSTALL_LAUNCH_REDIRECT_URI    = ${bindings.<name>.redirectUri}
+INSTALL_LAUNCH_CONSUME_PATH    = ${bindings.<name>.consumePath}
 ```
+
+app は handler で `POST ${ACCOUNTS_BASE_URL}/v1/installations/${INSTALL_LAUNCH_INSTALLATION_ID}/launch-token/consume` を
+叩いて redeem する。 詳細は [launch-token.md § 6](../../../takosumi-cloud/docs/apps/launch-token.md#6-app-側の実装-consume_path-handler)。
 
 ### 6.5 例
 
@@ -494,6 +492,19 @@ bindings:
     consumePath: /_takosumi/launch
     maxLifetimeSeconds: 300
 ```
+
+### 6.6 Migration from JWS (legacy)
+
+v0 の binding は JWS verify 用に `INSTALL_LAUNCH_PUBLIC_KEY` / `INSTALL_LAUNCH_AUDIENCE` / `INSTALL_LAUNCH_ISSUER` を
+注入する model だった。 v1 で opaque token + TLS redeem に整理された。
+
+旧 env は deprecation window 中は併存。 app は次の順で fallback できる:
+
+1. `ACCOUNTS_BASE_URL` がある場合 → opaque token model で redeem
+2. `INSTALL_LAUNCH_PUBLIC_KEY` がある場合 → legacy JWS verify (deprecated、 将来削除)
+
+完全 cutover は
+[install-lifecycle-roadmap](../../../takosumi-cloud/docs/install-lifecycle-roadmap.md) を参照。
 
 ## 7. Namespace exports are not AppBinding kinds
 
@@ -607,8 +618,10 @@ resources:
         BLOB_SECRET_KEY: "${secrets.blob.secretKey}"
         BASE_URL: "${bindings.domain.url}"
         TAKOS_INSTALLATION_ID: "${installation.id}"
-        INSTALL_LAUNCH_PUBLIC_KEY: "${bindings.bootstrap.publicKey}"
-        INSTALL_LAUNCH_AUDIENCE: "${bindings.bootstrap.audience}"
+        ACCOUNTS_BASE_URL: "${bindings.bootstrap.accountsBaseUrl}"
+        INSTALL_LAUNCH_INSTALLATION_ID: "${bindings.bootstrap.installationId}"
+        INSTALL_LAUNCH_REDIRECT_URI: "${bindings.bootstrap.redirectUri}"
+        INSTALL_LAUNCH_CONSUME_PATH: "${bindings.bootstrap.consumePath}"
 ```
 
 ## References
