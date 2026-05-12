@@ -5,7 +5,8 @@
  * real implementation that resolves `.takosumi/manifest.yml` plus the
  * referenced workflows and submits the cleaned manifest to the takosumi
  * kernel via `POST /v1/deployments`. `history` reads manifest git history.
- * `serve` receives git webhooks and dispatches push.
+ * `serve` receives git webhooks and dispatches push. `watch` polls a local
+ * deployment repository and dispatches push when HEAD changes.
  */
 
 import { runPushCli } from "./push.ts";
@@ -16,6 +17,7 @@ import { runInstallCli } from "./install.ts";
 import { runImportCli } from "./import.ts";
 import { runExportCli, runMaterializeCli } from "./lifecycle.ts";
 import { runRollbackCli, runUpgradeCli } from "./revision.ts";
+import { runWatchCli } from "./watch.ts";
 
 const VERSION = "0.3.0";
 
@@ -35,6 +37,7 @@ COMMANDS:
   rollback    Preview or apply an AppInstallation rollback revision
   materialize Request shared-cell to dedicated materialization
   export      Request a self-host export bundle operation
+  watch       Poll a deployment repo and push when HEAD changes
   serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
   help        Show this help
@@ -130,6 +133,18 @@ SERVE OPTIONS:
   --rate-limit <n>             max requests per rate window (default 60)
   --rate-limit-window-ms <n>   rate window milliseconds (default 60000)
 
+WATCH OPTIONS:
+  --cwd <dir>                  deployment repo root (default .)
+  --endpoint <url>             takosumi kernel endpoint (or TAKOSUMI_ENDPOINT)
+  --token <token>              bearer token (or TAKOSUMI_TOKEN)
+  --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
+  --workflows-dir <path>       workflows dir (default .takosumi/workflows)
+  --artifact-contract <v0|v1|auto>
+                               artifact URI resolver (default v1)
+  --poll-interval-ms <n>       git HEAD poll interval (default 5000)
+  --run-current                deploy current HEAD before watching changes
+  --once                       exit after the first dispatched push
+
 GLOBAL OPTIONS:
   -h, --help     Show help
   -v, --version  Print version
@@ -174,6 +189,9 @@ export async function run(args: readonly string[]): Promise<number> {
   }
   if (first === "serve") {
     return await runServeCli(rest);
+  }
+  if (first === "watch") {
+    return await runWatchCli(rest);
   }
   Deno.stderr.writeSync(
     new TextEncoder().encode(`takosumi-git: unknown command '${first}'\n`),
