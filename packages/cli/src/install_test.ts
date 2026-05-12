@@ -538,6 +538,7 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
         TAKOSUMI_SUBJECT: "tsub_owner",
         TAKOS_TOKEN: "secret",
         TAKOSUMI_RUNTIME_BASE_URL: "https://hello.example",
+        TAKOSUMI_INSTALL_LAUNCH_RETURN_TO: "/spaces/space_1/threads",
         TAKOSUMI_ENDPOINT: "https://kernel.example",
         TAKOSUMI_DEPLOY_TOKEN: "deploy-secret",
       };
@@ -554,6 +555,7 @@ Deno.test("parseInstallArgs reads apply options from env", () => {
   assertEquals(parsed.mode, "dedicated");
   assertEquals(parsed.sourceCommit, "abcdefabcdefabcdefabcdefabcdefabcdefabcd");
   assertEquals(parsed.runtimeBaseUrl, "https://hello.example");
+  assertEquals(parsed.launchReturnTo, "/spaces/space_1/threads");
   assertEquals(parsed.confirmPreviewId, "preview_0123456789abcdef01234567");
   assertEquals(
     parsed.confirmPermissionDigest,
@@ -606,6 +608,29 @@ Deno.test("parseInstallArgs rejects invalid install runtime mode", () => {
       }),
     Error,
     "--mode must be one of shared-cell|dedicated|self-hosted",
+  );
+});
+
+Deno.test("parseInstallArgs rejects invalid launch return targets", () => {
+  assertThrows(
+    () =>
+      parseInstallArgs([
+        "apply",
+        "--launch-return-to",
+        "https://evil.example/spaces",
+      ], {
+        get(key: string) {
+          const env: Record<string, string> = {
+            TAKOSUMI_ACCOUNTS_URL: "http://accounts.example",
+            TAKOS_ACCOUNT_ID: "acct_1",
+            TAKOS_SPACE_ID: "space_1",
+            TAKOSUMI_SUBJECT: "tsub_owner",
+          };
+          return env[key];
+        },
+      }),
+    Error,
+    "--launch-return-to must be a slash-prefixed path without query",
   );
 });
 
@@ -926,9 +951,10 @@ resources:
       createdBySubject: "tsub_owner",
       costAck: true,
       runtimeBaseUrl: "http://localhost:8787",
+      launchReturnTo: "/spaces/space_1/threads",
       endpoint: "http://kernel.example/",
       deployToken: "deploy-secret",
-      fetch: (input, init) => {
+      fetch: async (input, init) => {
         requests.push(new Request(input, init));
         const url = String(input);
         if (url.includes("/v1/deployments")) {
@@ -958,8 +984,14 @@ resources:
           url.endsWith("/v1/installations/inst_1/launch-token") &&
           request.method === "POST"
         ) {
+          const body = await request.json();
+          assertEquals(
+            body.redirectUri,
+            "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads",
+          );
           return Promise.resolve(Response.json({
-            url: "http://localhost:8787/_takosumi/launch?token=launch-jws",
+            url:
+              "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads&token=launch-jws",
             token: "launch-jws",
             expiresAt: "2026-05-12T00:02:00.000Z",
             jti: "lt_1",
@@ -1020,7 +1052,7 @@ resources:
     assertEquals(result.statusTransition?.status, 200);
     assertEquals(
       result.launch?.url,
-      "http://localhost:8787/_takosumi/launch?token=launch-jws",
+      "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads&token=launch-jws",
     );
     assertEquals(result.accounts.installationId, "inst_1");
     assertEquals(
@@ -1114,7 +1146,8 @@ resources:
     assertEquals(await requests[4].json(), {
       purpose: "install-bootstrap",
       ttlSeconds: 120,
-      redirectUri: "http://localhost:8787/_takosumi/launch",
+      redirectUri:
+        "http://localhost:8787/_takosumi/launch?return_to=%2Fspaces%2Fspace_1%2Fthreads",
     });
   } finally {
     await Deno.remove(root, { recursive: true });

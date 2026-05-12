@@ -1636,6 +1636,7 @@ export interface ParsedInstallArgs {
   readonly mode?: InstallableAppRuntimeMode;
   readonly sourceCommit?: string;
   readonly runtimeBaseUrl?: string;
+  readonly launchReturnTo?: string;
   readonly confirmPreviewId?: string;
   readonly confirmPermissionDigest?: `sha256:${string}`;
   readonly costAck?: boolean;
@@ -1692,6 +1693,7 @@ export function parseInstallArgs(
       "mode",
       "source-commit",
       "runtime-base-url",
+      "launch-return-to",
       "preview-id",
       "permission-digest",
       "endpoint",
@@ -1737,6 +1739,10 @@ export function parseInstallArgs(
   const runtimeBaseUrl = parseRuntimeBaseUrl(
     (flags["runtime-base-url"] as string | undefined) ??
       env.get("TAKOSUMI_RUNTIME_BASE_URL"),
+  );
+  const launchReturnTo = parseLaunchReturnTo(
+    (flags["launch-return-to"] as string | undefined) ??
+      env.get("TAKOSUMI_INSTALL_LAUNCH_RETURN_TO"),
   );
   const confirmPreviewId = flags["preview-id"] as string | undefined;
   const confirmPermissionDigest = flags["permission-digest"] as
@@ -1815,6 +1821,7 @@ export function parseInstallArgs(
     ...(mode ? { mode } : {}),
     ...(sourceCommit ? { sourceCommit } : {}),
     ...(runtimeBaseUrl ? { runtimeBaseUrl } : {}),
+    ...(launchReturnTo ? { launchReturnTo } : {}),
     ...(confirmPreviewId ? { confirmPreviewId } : {}),
     ...(confirmPermissionDigest
       ? {
@@ -1898,6 +1905,16 @@ function parseRuntimeBaseUrl(value: string | undefined): string | undefined {
   }
 }
 
+function parseLaunchReturnTo(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  if (!pathPattern.test(value)) {
+    throw new Error(
+      "--launch-return-to must be a slash-prefixed path without query",
+    );
+  }
+  return value;
+}
+
 export class InstallHelpRequested extends Error {
   constructor() {
     super("help requested");
@@ -1933,6 +1950,8 @@ APPLY OPTIONS:
   --source-commit <sha> resolved 40-char source commit pin
   --runtime-base-url <url>
                         app runtime base URL for OIDC redirect materialization
+  --launch-return-to <path>
+                        app path to open after launch token session creation
   --preview-id <id>     preview id being approved; must match recomputed preview
   --permission-digest <sha256:...>
                         permission digest being approved; must match recomputed preview
@@ -2409,9 +2428,10 @@ export async function applyInstall(
         accountsUrl: options.accountsUrl,
         token: options.token,
         installationId,
-        redirectUri: absoluteUrl(
+        redirectUri: launchRedirectUri(
           options.runtimeBaseUrl,
           app.install.postInstallLaunchPath,
+          options.launchReturnTo,
         ),
         fetch: options.fetch,
       });
@@ -2429,6 +2449,16 @@ export async function applyInstall(
     ...(statusTransition ? { statusTransition } : {}),
     ...(launch ? { launch } : {}),
   };
+}
+
+function launchRedirectUri(
+  runtimeBaseUrl: string,
+  postInstallLaunchPath: string,
+  launchReturnTo?: string,
+): string {
+  const url = new URL(absoluteUrl(runtimeBaseUrl, postInstallLaunchPath));
+  if (launchReturnTo) url.searchParams.set("return_to", launchReturnTo);
+  return url.toString();
 }
 
 async function patchInstallationStatus(input: {
