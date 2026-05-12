@@ -255,6 +255,12 @@ const installerPlaceholderGlobalPattern =
   /\$\{(params|installation|artifacts|bindings|secrets|refs|imports)\.([^}]+)}/g;
 const installArtifactMarkerPrefix = "TAKOSUMI_ARTIFACT=";
 const digestPinnedImagePattern = /^.+@sha256:[0-9a-f]{64}$/;
+const installLaunchOpaqueEnvKeys = [
+  "ACCOUNTS_BASE_URL",
+  "INSTALL_LAUNCH_INSTALLATION_ID",
+  "INSTALL_LAUNCH_REDIRECT_URI",
+  "INSTALL_LAUNCH_CONSUME_PATH",
+] as const;
 const workflowEnvAllowlist = [
   "PATH",
   "HOME",
@@ -2571,17 +2577,9 @@ function assertRequiredLaunchTokenConfig(
     if (!configRef || configRef.startsWith("takosumi-git://")) {
       missing.push(`${name}:install-launch-token@v1:configRef`);
     }
-    const launchEnv = isRecord(accounts.launchTokenConfig?.env)
-      ? accounts.launchTokenConfig.env
-      : {};
-    for (
-      const envKey of [
-        "INSTALL_LAUNCH_PUBLIC_KEY",
-        "INSTALL_LAUNCH_AUDIENCE",
-        "INSTALL_LAUNCH_ISSUER",
-      ]
-    ) {
-      if (!hasEnvKey(launchEnv, envKey)) {
+    const launchEnv = launchTokenConfigEnv(accounts);
+    for (const envKey of installLaunchOpaqueEnvKeys) {
+      if (!hasNonEmptyEnvKey(launchEnv, envKey)) {
         missing.push(`${name}:install-launch-token@v1:${envKey}`);
       }
     }
@@ -2618,7 +2616,7 @@ function assertRequiredProviderBindingsMaterialized(
       missing.push(`${name}:${binding.type}:configRef`);
     }
     for (const envKey of requiredBindingEnvKeys(binding.type)) {
-      if (!hasEnvKey(accounts.bindingEnv ?? {}, envKey)) {
+      if (!hasNonEmptyEnvKey(accounts.bindingEnv ?? {}, envKey)) {
         missing.push(`${name}:${binding.type}:${envKey}`);
       }
     }
@@ -2977,19 +2975,22 @@ function bindingPlaceholderValues(
   }
   if (type === "install-launch-token@v1") {
     const launchConfig = input.accounts.launchTokenConfig ?? {};
-    const env = isRecord(launchConfig.env) ? launchConfig.env : {};
+    const env = launchTokenConfigEnv(input.accounts);
     return {
-      publicKey: stringFromUnknown(env.INSTALL_LAUNCH_PUBLIC_KEY),
-      audience: stringFromUnknown(env.INSTALL_LAUNCH_AUDIENCE) ??
-        stringProperty(launchConfig, "audience", "audience"),
-      issuer: stringFromUnknown(env.INSTALL_LAUNCH_ISSUER) ??
-        stringProperty(launchConfig, "issuer", "issuer"),
-      algorithm: stringProperty(launchConfig, "algorithm", "algorithm") ??
-        "RS256",
-      kid: stringProperty(launchConfig, "kid", "kid"),
-      consumePath: input.accounts.installationId
-        ? `/v1/installations/${input.accounts.installationId}/launch-token/consume`
-        : undefined,
+      accountsBaseUrl: stringFromUnknown(env.ACCOUNTS_BASE_URL) ??
+        stringProperty(launchConfig, "accounts_base_url", "accountsBaseUrl"),
+      installationId: stringFromUnknown(env.INSTALL_LAUNCH_INSTALLATION_ID) ??
+        stringProperty(launchConfig, "installation_id", "installationId") ??
+        input.accounts.installationId,
+      redirectUri: stringFromUnknown(env.INSTALL_LAUNCH_REDIRECT_URI) ??
+        stringProperty(launchConfig, "redirect_uri", "redirectUri"),
+      consumePath: stringFromUnknown(env.INSTALL_LAUNCH_CONSUME_PATH) ??
+        stringProperty(launchConfig, "consume_path", "consumePath"),
+      maxLifetimeSeconds: numberProperty(
+        launchConfig,
+        "max_lifetime_seconds",
+        "maxLifetimeSeconds",
+      ),
     };
   }
   return {};
@@ -3131,16 +3132,8 @@ function accountsRuntimeEnv(input: {
   }
 
   if (appHasBindingType(input.app, "install-launch-token@v1")) {
-    const launchEnv = isRecord(input.accounts.launchTokenConfig?.env)
-      ? input.accounts.launchTokenConfig.env
-      : {};
-    for (
-      const key of [
-        "INSTALL_LAUNCH_PUBLIC_KEY",
-        "INSTALL_LAUNCH_AUDIENCE",
-        "INSTALL_LAUNCH_ISSUER",
-      ]
-    ) {
+    const launchEnv = launchTokenConfigEnv(input.accounts);
+    for (const key of installLaunchOpaqueEnvKeys) {
       const value = launchEnv[key];
       if (typeof value === "string" && value.length > 0) env[key] = value;
     }
@@ -3183,6 +3176,22 @@ function hasEnvKey(env: Record<string, unknown>, key: string): boolean {
   return Object.keys(env).some((existing) =>
     existing.toUpperCase() === normalized
   );
+}
+
+function hasNonEmptyEnvKey(env: Record<string, unknown>, key: string): boolean {
+  const normalized = key.toUpperCase();
+  return Object.entries(env).some(([existing, value]) =>
+    existing.toUpperCase() === normalized &&
+    typeof value === "string" &&
+    value.length > 0
+  );
+}
+
+function launchTokenConfigEnv(
+  accounts: AccountsInstallResponseSummary,
+): Record<string, unknown> {
+  const launchConfig = accounts.launchTokenConfig;
+  return launchConfig && isRecord(launchConfig.env) ? launchConfig.env : {};
 }
 
 export class InstallApplyError extends Error {
@@ -3304,6 +3313,11 @@ function readAccountsInstallResponse(
     "oidcClientSecret",
   );
   const bindingEnv = stringRecordProperty(record, "binding_env", "bindingEnv");
+  const launchTokenConfig = isRecord(record.launch_token_config)
+    ? record.launch_token_config
+    : isRecord(record.launchTokenConfig)
+    ? record.launchTokenConfig
+    : undefined;
   const runtimeBinding = isRecord(record.runtime_binding)
     ? record.runtime_binding
     : isRecord(record.runtimeBinding)
@@ -3318,6 +3332,7 @@ function readAccountsInstallResponse(
     ...(oidcClient ? { oidcClient } : {}),
     ...(oidcClientSecret ? { oidcClientSecret } : {}),
     ...(bindingEnv ? { bindingEnv } : {}),
+    ...(launchTokenConfig ? { launchTokenConfig } : {}),
   };
 }
 
@@ -3356,6 +3371,16 @@ function stringProperty(
 
 function stringFromUnknown(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberProperty(
+  record: Record<string, unknown>,
+  snakeKey: string,
+  camelKey: string,
+): number | undefined {
+  const value = record[snakeKey] ?? record[camelKey];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return undefined;
 }
 
 function stringArrayProperty(

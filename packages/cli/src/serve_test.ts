@@ -67,6 +67,27 @@ function baseOptions(dispatches: WebhookDispatchJob[] = []) {
   };
 }
 
+function opaqueLaunchTokenConfig(
+  installationId: string,
+): Record<string, unknown> {
+  const accountsBaseUrl = "http://accounts.example";
+  const redirectUri = "https://hello.example.test/_takosumi/launch";
+  const consumePath = "/_takosumi/launch";
+  return {
+    accountsBaseUrl,
+    installationId,
+    redirectUri,
+    consumePath,
+    maxLifetimeSeconds: 300,
+    env: {
+      ACCOUNTS_BASE_URL: accountsBaseUrl,
+      INSTALL_LAUNCH_INSTALLATION_ID: installationId,
+      INSTALL_LAUNCH_REDIRECT_URI: redirectUri,
+      INSTALL_LAUNCH_CONSUME_PATH: consumePath,
+    },
+  };
+}
+
 async function signedRequest(
   provider: "github" | "gitlab" | "gitea",
   body: unknown,
@@ -336,17 +357,9 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
           url.endsWith("/v1/installations/inst_1/launch-token") &&
           request.method === "GET"
         ) {
-          return Promise.resolve(Response.json({
-            issuer: "https://accounts.example",
-            audience: "example.hello",
-            algorithm: "RS256",
-            kid: "launch-test",
-            env: {
-              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-              INSTALL_LAUNCH_AUDIENCE: "example.hello",
-              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
-            },
-          }));
+          return Promise.resolve(Response.json(opaqueLaunchTokenConfig(
+            "inst_1",
+          )));
         }
         if (
           url.endsWith("/v1/installations/inst_1/launch-token") &&
@@ -508,17 +521,7 @@ Deno.test("serve completes Git URL preview approval to ready AppInstallation wit
           url.endsWith("/v1/installations/inst_approval/launch-token") &&
           request.method === "GET"
         ) {
-          return Response.json({
-            issuer: "https://accounts.example",
-            audience: "example.hello",
-            algorithm: "RS256",
-            kid: "launch-test",
-            env: {
-              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-              INSTALL_LAUNCH_AUDIENCE: "example.hello",
-              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
-            },
-          });
+          return Response.json(opaqueLaunchTokenConfig("inst_approval"));
         }
         if (
           url.endsWith("/v1/installations/inst_approval/launch-token") &&

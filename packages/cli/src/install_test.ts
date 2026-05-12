@@ -179,6 +179,37 @@ function restoreEnv(values: Record<string, string | undefined>): void {
   }
 }
 
+function opaqueLaunchTokenConfig(
+  overrides: {
+    readonly accountsBaseUrl?: string;
+    readonly installationId?: string;
+    readonly redirectUri?: string;
+    readonly consumePath?: string;
+    readonly maxLifetimeSeconds?: number;
+  } = {},
+): Record<string, unknown> {
+  const accountsBaseUrl = overrides.accountsBaseUrl ??
+    "http://accounts.example";
+  const installationId = overrides.installationId ?? "inst_1";
+  const redirectUri = overrides.redirectUri ??
+    "http://localhost:8787/_takosumi/launch";
+  const consumePath = overrides.consumePath ?? "/_takosumi/launch";
+  const maxLifetimeSeconds = overrides.maxLifetimeSeconds ?? 300;
+  return {
+    accountsBaseUrl,
+    installationId,
+    redirectUri,
+    consumePath,
+    maxLifetimeSeconds,
+    env: {
+      ACCOUNTS_BASE_URL: accountsBaseUrl,
+      INSTALL_LAUNCH_INSTALLATION_ID: installationId,
+      INSTALL_LAUNCH_REDIRECT_URI: redirectUri,
+      INSTALL_LAUNCH_CONSUME_PATH: consumePath,
+    },
+  };
+}
+
 Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   const app = parseInstallableAppYaml(VALID_APP_YML);
 
@@ -968,17 +999,9 @@ resources:
           url.endsWith("/v1/installations/inst_1/launch-token") &&
           request.method === "GET"
         ) {
-          return Promise.resolve(Response.json({
-            issuer: "https://accounts.example",
-            audience: "example.hello",
-            algorithm: "RS256",
-            kid: "launch-test",
-            env: {
-              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-              INSTALL_LAUNCH_AUDIENCE: "example.hello",
-              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
-            },
-          }));
+          return Promise.resolve(Response.json(
+            opaqueLaunchTokenConfig(),
+          ));
         }
         if (
           url.endsWith("/v1/installations/inst_1/launch-token") &&
@@ -1124,9 +1147,10 @@ resources:
         BLOB_BUCKET: "inst-1",
         BLOB_ACCESS_KEY: "access-key",
         BLOB_SECRET_KEY: "secret-key",
-        INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-        INSTALL_LAUNCH_AUDIENCE: "example.hello",
-        INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+        ACCOUNTS_BASE_URL: "http://accounts.example",
+        INSTALL_LAUNCH_INSTALLATION_ID: "inst_1",
+        INSTALL_LAUNCH_REDIRECT_URI: "http://localhost:8787/_takosumi/launch",
+        INSTALL_LAUNCH_CONSUME_PATH: "/_takosumi/launch",
       },
     );
     assertEquals(
@@ -1186,8 +1210,11 @@ resources:
         DB_PASSWORD: \${secrets.database.password}
         BLOB_ENDPOINT: \${bindings.blob.endpoint}
         BLOB_SECRET_KEY: \${secrets.blob.secretKey}
-        INSTALL_LAUNCH_PUBLIC_KEY: \${bindings.bootstrap.publicKey}
+        ACCOUNTS_BASE_URL: \${bindings.bootstrap.accountsBaseUrl}
+        INSTALL_LAUNCH_INSTALLATION_ID: \${bindings.bootstrap.installationId}
+        INSTALL_LAUNCH_REDIRECT_URI: \${bindings.bootstrap.redirectUri}
         INSTALL_LAUNCH_CONSUME_PATH: \${bindings.bootstrap.consumePath}
+        INSTALL_LAUNCH_MAX_LIFETIME_SECONDS: \${bindings.bootstrap.maxLifetimeSeconds}
         DATABASE_CONFIG_REF: \${refs.database.configRef}
         DATABASE_SECRET_REF: \${refs.database.secretRefs[0]}
         BLOB_CONFIG_REF: \${refs.blob.config_ref}
@@ -1221,17 +1248,7 @@ resources:
           }));
         }
         if (url.endsWith("/v1/installations/inst_1/launch-token")) {
-          return Promise.resolve(Response.json({
-            issuer: "https://accounts.example",
-            audience: "example.hello",
-            algorithm: "RS256",
-            kid: "launch-test",
-            env: {
-              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-              INSTALL_LAUNCH_AUDIENCE: "example.hello",
-              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
-            },
-          }));
+          return Promise.resolve(Response.json(opaqueLaunchTokenConfig()));
         }
         if (url.includes("/status")) {
           return Promise.resolve(Response.json({
@@ -1308,11 +1325,17 @@ resources:
     assertEquals(env.DB_PASSWORD, "secret");
     assertEquals(env.BLOB_ENDPOINT, "https://objects.example.test");
     assertEquals(env.BLOB_SECRET_KEY, "secret-key");
-    assertEquals(env.INSTALL_LAUNCH_PUBLIC_KEY, '{"keys":[]}');
+    assertEquals(env.ACCOUNTS_BASE_URL, "http://accounts.example");
+    assertEquals(env.INSTALL_LAUNCH_INSTALLATION_ID, "inst_1");
+    assertEquals(
+      env.INSTALL_LAUNCH_REDIRECT_URI,
+      "http://localhost:8787/_takosumi/launch",
+    );
     assertEquals(
       env.INSTALL_LAUNCH_CONSUME_PATH,
-      "/v1/installations/inst_1/launch-token/consume",
+      "/_takosumi/launch",
     );
+    assertEquals(env.INSTALL_LAUNCH_MAX_LIFETIME_SECONDS, 300);
     assertEquals(
       env.DATABASE_CONFIG_REF,
       "takosumi-accounts://installations/inst_1/bindings/database/postgres/main",
@@ -1835,13 +1858,7 @@ Deno.test("applyInstall rejects missing required provider binding materializatio
             requests.push(new Request(input, init));
             const url = String(input);
             if (url.endsWith("/v1/installations/inst_1/launch-token")) {
-              return Promise.resolve(Response.json({
-                env: {
-                  INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-                  INSTALL_LAUNCH_AUDIENCE: "example.hello",
-                  INSTALL_LAUNCH_ISSUER: "https://accounts.example",
-                },
-              }));
+              return Promise.resolve(Response.json(opaqueLaunchTokenConfig()));
             }
             return Promise.resolve(Response.json({
               installation: { id: "inst_1" },
@@ -1874,7 +1891,7 @@ Deno.test("applyInstall rejects missing required provider binding materializatio
   }
 });
 
-Deno.test("applyInstall rejects missing required launch token config", async () => {
+Deno.test("applyInstall rejects missing required opaque launch token env", async () => {
   const root = await Deno.makeTempDir({ prefix: "takosumi-git-install-" });
   const requests: Request[] = [];
   try {
@@ -1907,7 +1924,9 @@ Deno.test("applyInstall rejects missing required launch token config", async () 
             requests.push(new Request(input, init));
             const url = String(input);
             if (url.endsWith("/v1/installations/inst_1/launch-token")) {
-              return Promise.resolve(Response.json({ env: {} }));
+              return Promise.resolve(Response.json({
+                env: {},
+              }));
             }
             return Promise.resolve(Response.json({
               installation: { id: "inst_1" },
@@ -1932,7 +1951,7 @@ Deno.test("applyInstall rejects missing required launch token config", async () 
           },
         }),
       Error,
-      "required launch token config is missing",
+      "ACCOUNTS_BASE_URL",
     );
     assertEquals(requests.length, 2);
     assertEquals(
@@ -1973,13 +1992,7 @@ Deno.test("runInstallCli returns failure when kernel deploy fails", async () => 
         );
       }
       if (request.url.endsWith("/v1/installations/inst_1/launch-token")) {
-        return Promise.resolve(Response.json({
-          env: {
-            INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
-            INSTALL_LAUNCH_AUDIENCE: "example.hello",
-            INSTALL_LAUNCH_ISSUER: "https://accounts.example",
-          },
-        }));
+        return Promise.resolve(Response.json(opaqueLaunchTokenConfig()));
       }
       if (request.url.includes("/status")) {
         return Promise.resolve(Response.json({
