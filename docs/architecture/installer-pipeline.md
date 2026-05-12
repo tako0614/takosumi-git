@@ -40,21 +40,21 @@ step で `failed` 状態に遷移し、AppInstallation には `installing → fa
 記録される (詳細は
 [Takosumi Accounts](../../../takosumi-cloud/docs/architecture/takosumi-accounts.md))。
 
-| #  | step                           | owner                   | 入力                                     | 出力                                                     |
-| -- | ------------------------------ | ----------------------- | ---------------------------------------- | -------------------------------------------------------- |
-| 1  | Git URL 受信                   | takosumi-git API        | `source.url` / `ref`                     | request id                                               |
-| 2  | repository fetch               | takosumi-git fetcher    | shallow clone                            | working tree                                             |
-| 3  | ref → commit SHA pin           | takosumi-git fetcher    | tag/branch                               | `sourceCommit`                                           |
-| 4  | `.takosumi/app.yml` parse      | installer               | working tree                             | InstallableApp v1                                        |
-| 5  | `.takosumi/manifest.yml` parse | installer               | working tree                             | template manifest                                        |
-| 6  | install preview 生成           | preview service         | step 4 / 5 + binding catalog             | preview JSON                                             |
-| 7  | user approve                   | takosumi-cloud UI / API | preview                                  | approval token                                           |
-| 8  | workflow sandbox 実行          | workflow runner         | `.takosumi/workflows/*.yml`              | artifact URI / image digest                              |
-| 9  | artifact resolve               | installer               | workflow output                          | workflowRef target value                                 |
-| 10 | binding provisioning request   | Takosumi Accounts       | AppBinding declaration                   | AppBinding ledger / one-shot env material                |
-| 11 | deploy manifest finalize       | manifest compiler       | authoring manifest + materialized inputs | compiled deploy manifest or unresolved-placeholder error |
-| 12 | kernel deploy                  | kernel client           | compiled manifest                        | `Deployment.id`                                          |
-| 13 | AppInstallation `ready`        | Takosumi Accounts       | step 10 / 12 completion                  | `status: ready`, `runtimeBindingId`                      |
+| #  | step                           | owner                | 入力                                     | 出力                                                     |
+| -- | ------------------------------ | -------------------- | ---------------------------------------- | -------------------------------------------------------- |
+| 1  | Git URL 受信                   | takosumi-git API     | `source.url` / `ref`                     | request id                                               |
+| 2  | repository fetch               | takosumi-git fetcher | shallow clone                            | working tree                                             |
+| 3  | ref → commit SHA pin           | takosumi-git fetcher | tag/branch                               | `sourceCommit`                                           |
+| 4  | `.takosumi/app.yml` parse      | installer            | working tree                             | InstallableApp v1                                        |
+| 5  | `.takosumi/manifest.yml` parse | installer            | working tree                             | template manifest                                        |
+| 6  | install preview 生成           | preview service      | step 4 / 5 + binding catalog             | preview JSON                                             |
+| 7  | user approve                   | operator UI / API    | preview                                  | approval token                                           |
+| 8  | workflow sandbox 実行          | workflow runner      | `.takosumi/workflows/*.yml`              | artifact URI / image digest                              |
+| 9  | artifact resolve               | installer            | workflow output                          | workflowRef target value                                 |
+| 10 | binding provisioning request   | Takosumi Accounts    | AppBinding declaration                   | AppBinding ledger / one-shot env material                |
+| 11 | deploy manifest finalize       | manifest compiler    | authoring manifest + materialized inputs | compiled deploy manifest or unresolved-placeholder error |
+| 12 | kernel deploy                  | kernel client        | compiled manifest                        | `Deployment.id`                                          |
+| 13 | AppInstallation `ready`        | Takosumi Accounts    | step 10 / 12 completion                  | `status: ready`, `runtimeBindingId`                      |
 
 `.takosumi/app.yml` (installer-bound) と `.takosumi/manifest.yml` (authoring
 compute manifest) は **明確に別物** で、step 4 / 5 で別 parser を
@@ -247,9 +247,8 @@ revoke 時の挙動:
   (graceful)。
 - revoke は InstallationEvent ledger に append-only で記録される。
 
-詳細な capability 一覧は
-[Binding Catalog](../reference/binding-catalog.md) を参照。revoke API
-と AppGrant ledger は Takosumi Accounts が所有します。
+詳細な capability 一覧は [Binding Catalog](../reference/binding-catalog.md)
+を参照。revoke API と AppGrant ledger は Takosumi Accounts が所有します。
 
 ## 次に読むページ
 
@@ -258,7 +257,7 @@ revoke 時の挙動:
 - [Takosumi Accounts](../../../takosumi-cloud/docs/architecture/takosumi-accounts.md)
   `POST /v1/install/preview` / `POST /v1/installations` と AppInstallation
   status の owner。
-- [Binding Catalog](../reference/binding-catalog.md) step 10
-  で注入される binding 種別と AppGrant の対応。
+- [Binding Catalog](../reference/binding-catalog.md) step 10 で注入される
+  binding 種別と AppGrant の対応。
 - [Runtime Modes](../../../docs/platform/runtime-modes.md) step 13 で確定する
   `mode` 列の意味。

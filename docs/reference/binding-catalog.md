@@ -9,7 +9,7 @@
 `.takosumi/app.yml` の `bindings:` 節で宣言できる **binding type の正本
 catalog** です。Installable App Model では binding は app が要求する **resource
 抽象型** を 6 種に固定し、provision / inject / rotate / revoke / destroy の
-lifecycle を Takosumi Cloud / Takosumi Accounts / takosumi-git の側が
+lifecycle を operator distribution / Takosumi Accounts / takosumi-git の側が
 担います。Operator / account plane dependency は AppBinding ではなく namespace
 export と account API / BillingPort で表現します。
 
@@ -61,9 +61,9 @@ compiler will invent values when no materializer supplied them.
 | # | type identifier                 | domain             | 主担当                                  | required env (default)                                                                                                                                                                                    |
 | - | ------------------------------- | ------------------ | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1 | `identity.oidc@v1`              | identity           | Takosumi Accounts (OIDC issuer)         | `OIDC_ISSUER_URL` / `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI`                                                                                                                         |
-| 2 | `database.postgres@v1`          | data plane         | takosumi-cloud managed-postgres         | `DATABASE_URL`                                                                                                                                                                                            |
-| 3 | `object-store.s3-compatible@v1` | data plane         | takosumi-cloud managed-object-store     | `BLOB_ENDPOINT` / `BLOB_BUCKET` / `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY`                                                                                                                                   |
-| 4 | `domain.http@v1`                | network            | takosumi-cloud domain manager + DNS     | (env 注入なし。`${bindings.<name>.url}` を manifest 側で参照)                                                                                                                                             |
+| 2 | `database.postgres@v1`          | data plane         | operator managed-postgres provider      | `DATABASE_URL`                                                                                                                                                                                            |
+| 3 | `object-store.s3-compatible@v1` | data plane         | operator managed-object-store provider  | `BLOB_ENDPOINT` / `BLOB_BUCKET` / `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY`                                                                                                                                   |
+| 4 | `domain.http@v1`                | network            | operator domain manager + DNS           | (env 注入なし。`${bindings.<name>.url}` を manifest 側で参照)                                                                                                                                             |
 | 5 | `deploy-intent.gitops@v1`       | deploy bridge      | takosumi-git deploy intent repo         | `DEPLOY_INTENT_DRIVER` / `DEPLOY_INTENT_REMOTE` / `DEPLOY_INTENT_TOKEN`                                                                                                                                   |
 | 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `ACCOUNTS_BASE_URL` / `INSTALL_LAUNCH_INSTALLATION_ID` / `INSTALL_LAUNCH_CONSUME_PATH` (app derives redirect URI locally from `${ACCOUNTS_BASE_URL}` + `${INSTALL_LAUNCH_CONSUME_PATH}` and its own host) |
 
