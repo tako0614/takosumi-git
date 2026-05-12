@@ -448,6 +448,175 @@ Deno.test("serve apply API runs install apply pipeline from Git source", async (
   }
 });
 
+Deno.test("serve completes Git URL preview approval to ready AppInstallation within five minutes", async () => {
+  const checkoutRoot = await Deno.makeTempDir({
+    prefix: "takosumi-git-serve-preview-apply-",
+  });
+  const requests: Request[] = [];
+  const startedAt = Date.now();
+  let observedStatus: string | undefined;
+  try {
+    await Deno.mkdir(join(checkoutRoot, ".takosumi"));
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "app.yml"),
+      APP_YML_WITH_LAUNCH,
+    );
+    await Deno.writeTextFile(
+      join(checkoutRoot, ".takosumi", "manifest.yml"),
+      'apiVersion: "1.0"\nkind: Manifest\nresources: []\n',
+    );
+    const handler = createServeHandler({
+      ...baseOptions(),
+      endpoint: "http://kernel.example",
+      token: "serve-token",
+      accountsUrl: "http://accounts.example",
+      accountsToken: "accounts-token",
+      deployToken: "deploy-token",
+      runtimeBaseUrl: "https://hello.example.test",
+      accountId: "acct_default",
+      spaceId: "space_default",
+      subject: "tsub_default",
+      installPreviewCheckoutSource: (request) => {
+        assertEquals(request, {
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+        });
+        return Promise.resolve({
+          root: checkoutRoot,
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          cleanup: () => Promise.resolve(),
+        });
+      },
+      installApplyFetch: async (input, init) => {
+        const request = new Request(input, init);
+        requests.push(request);
+        const url = String(input);
+        if (url.includes("/v1/deployments")) {
+          return Response.json({
+            status: "ok",
+            outcome: { status: "succeeded" },
+          });
+        }
+        if (url.includes("/status")) {
+          const statusBody = await request.clone().json();
+          observedStatus = String(statusBody.status);
+          return Response.json({
+            installation: { id: "inst_approval", status: "ready" },
+          });
+        }
+        if (
+          url.endsWith("/v1/installations/inst_approval/launch-token") &&
+          request.method === "GET"
+        ) {
+          return Response.json({
+            issuer: "https://accounts.example",
+            audience: "example.hello",
+            algorithm: "RS256",
+            kid: "launch-test",
+            env: {
+              INSTALL_LAUNCH_PUBLIC_KEY: '{"keys":[]}',
+              INSTALL_LAUNCH_AUDIENCE: "example.hello",
+              INSTALL_LAUNCH_ISSUER: "https://accounts.example",
+            },
+          });
+        }
+        if (
+          url.endsWith("/v1/installations/inst_approval/launch-token") &&
+          request.method === "POST"
+        ) {
+          return Response.json({
+            url: "https://hello.example.test/_takosumi/launch?token=launch-jws",
+            token: "launch-jws",
+          });
+        }
+        return Response.json({
+          installation: { id: "inst_approval" },
+          bindings: [{
+            name: "bootstrap",
+            kind: "install-launch-token@v1",
+            config_ref:
+              "takosumi-accounts://installations/inst_approval/bindings/bootstrap/launch-token/launch-test",
+            secret_refs: [],
+          }],
+        }, { status: 202 });
+      },
+    });
+
+    const previewResponse = await handler(
+      new Request("http://localhost/v1/install/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+        }),
+      }),
+    );
+
+    assertEquals(previewResponse.status, 200);
+    const preview = await previewResponse.json();
+    assertEquals(String(preview.previewId).startsWith("preview_"), true);
+    assertEquals(
+      String(preview.permissionDigest).startsWith("sha256:"),
+      true,
+    );
+    assertEquals(
+      preview.source.commit,
+      "0123456789abcdef0123456789abcdef01234567",
+    );
+
+    const applyResponse = await handler(
+      new Request("http://localhost/v1/install/apply", {
+        method: "POST",
+        headers: {
+          "authorization": "Bearer serve-token",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          gitUrl: "https://github.com/example/hello",
+          ref: "v1.2.3",
+          accountId: "acct_1",
+          spaceId: "space_1",
+          subject: "tsub_owner",
+          previewId: preview.previewId,
+          permissionDigest: preview.permissionDigest,
+          sourceCommit: preview.source.commit,
+          costAck: true,
+        }),
+      }),
+    );
+
+    assertEquals(applyResponse.status, 202);
+    const body = await applyResponse.json();
+    assertEquals(body.kind, "takosumi-git.install-apply@v1");
+    assertEquals(body.response.status, 202);
+    assertEquals(body.accounts.installationId, "inst_approval");
+    assertEquals(body.statusTransition.body.installation.status, "ready");
+    assertEquals(observedStatus, "ready");
+    assertEquals(Date.now() - startedAt < 5 * 60_000, true);
+    assertEquals(requests.length, 5);
+
+    const installBody = await requests[0].json();
+    assertEquals(installBody.confirm.previewId, preview.previewId);
+    assertEquals(
+      installBody.confirm.permissionDigest,
+      preview.permissionDigest,
+    );
+    assertEquals(installBody.confirm.costAck, true);
+    assertEquals(installBody.source.commit, preview.source.commit);
+    assertEquals(
+      requests[3].url,
+      "http://accounts.example/v1/installations/inst_approval/status",
+    );
+    assertEquals(await requests[3].json(), {
+      status: "ready",
+      reason: "kernel deploy HTTP 200",
+    });
+  } finally {
+    await Deno.remove(checkoutRoot, { recursive: true }).catch(() => {});
+  }
+});
+
 Deno.test("serve apply API requires bearer token", async () => {
   const handler = createServeHandler({
     ...baseOptions(),
