@@ -556,7 +556,7 @@ placeholder の優先順位:
 
 kernel-resolved references は compiled manifest にそのまま残るが、それ以外 (1〜6
 と legacy `${refs.*}`) は **kernel deploy payload に残らない** invariant。
-current `takosumi-git install apply` は Takosumi Accounts が所有する
+current `takosumi-git install apply` は operator account plane が所有する
 AppInstallation の materialization result で supported `${bindings.*}` /
 `${secrets.*}` / `${installation.*}` を解決し、 deploy request build 後も
 installer-only placeholder が残る場合は kernel request 前に失敗する。`${env.*}`

@@ -162,7 +162,8 @@ Authorization: Bearer <takosumi-account-token>
 ```
 
 完全な wire shape (preview / launch-token / materialize / export / upgrade /
-rollback) は Takosumi Accounts が所有する。
+rollback) は operator account plane が所有する (reference impl: Takosumi
+Accounts)。
 
 ## 4. Commit pin の必須性
 
@@ -251,7 +252,8 @@ revoke 時の挙動:
 - revoke は InstallationEvent ledger に append-only で記録される。
 
 詳細な capability 一覧は [Binding Catalog](../reference/binding-catalog.md)
-を参照。revoke API と AppGrant ledger は Takosumi Accounts が所有します。
+を参照。revoke API と AppGrant ledger は operator account plane が所有します
+(reference impl: Takosumi Accounts)。
 
 ## 次に読むページ
 

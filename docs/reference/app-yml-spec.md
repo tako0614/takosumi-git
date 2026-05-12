@@ -71,8 +71,8 @@ metadata:
 | `metadata.homepage`              | ✅       | `https://` URL。Publisher verification の DNS TXT record 解決元                                   |
 | `metadata.signingKeyFingerprint` | optional | `SHA256:<base64>` の Ed25519 pubkey fingerprint。なければ `verified: false` 扱い                  |
 
-`metadata.id` の値は Takosumi Accounts が所有する AppInstallation table の
-`appId` 列と一致します。
+`metadata.id` の値は operator account plane が所有する AppInstallation table
+(reference impl: Takosumi Accounts) の `appId` 列と一致します。
 
 ### 3.2 `source`
 
@@ -205,11 +205,12 @@ explicit grant / account API / OIDC discovery / BillingPort で materialize
 
 `bindings.<name>` の `<name>` は、account-plane materializer が提供する
 `${bindings.<name>.<key>}` / `${secrets.<name>.<key>}`
-と紐づきます。`install apply` は Takosumi Accounts が所有する AppInstallation の
-materialization result で Accounts-backed placeholder を解決し、 deploy request
-build 後も unresolved installer-only placeholder が残る場合は kernel request
-前に失敗します。`push` / `preview` には Accounts materialization phase
-がないため、installer-only placeholder を deploy 前に拒否します。
+と紐づきます。`install apply` は operator account plane が所有する
+AppInstallation の materialization result で account-plane-backed placeholder
+を解決し、 deploy request build 後も unresolved installer-only placeholder
+が残る場合は kernel request 前に失敗します。`push` / `preview` には Accounts
+materialization phase がないため、installer-only placeholder を deploy
+前に拒否します。
 
 ### 3.5.1 Namespace exports are not `app.yml` fields
 
@@ -505,7 +506,7 @@ AGENTS.md)。
 - [Manifest Reference](../../../takosumi/docs/reference/manifest-spec.md) —
   compiled Shape manifest の field 定義
 - [OIDC Consumer](../../../takos/docs/apps/oidc-consumer.md) — `bindings.auth`
-  (= `identity.oidc@v1`) が Takos runtime に渡す env
+  (= `identity.oidc@v1`) が Takosumi 上の Takos product runtime に渡す env
 - [Launch Token](../../../takosumi-cloud/docs/apps/launch-token.md) —
   `bindings.bootstrap` (= `install-launch-token@v1`) と
   `install.postInstallLaunchPath`
