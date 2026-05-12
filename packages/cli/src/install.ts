@@ -255,11 +255,22 @@ const installerPlaceholderGlobalPattern =
   /\$\{(params|installation|artifacts|bindings|secrets|refs|imports)\.([^}]+)}/g;
 const installArtifactMarkerPrefix = "TAKOSUMI_ARTIFACT=";
 const digestPinnedImagePattern = /^.+@sha256:[0-9a-f]{64}$/;
+// Required env keys that takosumi-git verifies are present in the Accounts
+// launch-token config response. The app at runtime composes `redirect_uri`
+// locally from `ACCOUNTS_BASE_URL` + `INSTALL_LAUNCH_CONSUME_PATH` (or its
+// own runtime base URL), so `INSTALL_LAUNCH_REDIRECT_URI` is NOT a required
+// Accounts-side field — see takosumi-git/docs/reference/binding-catalog.md §6.
 const installLaunchOpaqueEnvKeys = [
   "ACCOUNTS_BASE_URL",
   "INSTALL_LAUNCH_INSTALLATION_ID",
-  "INSTALL_LAUNCH_REDIRECT_URI",
   "INSTALL_LAUNCH_CONSUME_PATH",
+] as const;
+
+// Optional env keys takosumi-git will pass through if Accounts (or local
+// hydration with a runtime base URL) populates them. Apps may also derive
+// these at runtime, so absence is not a hard failure.
+const installLaunchOpaquePassThroughEnvKeys = [
+  "INSTALL_LAUNCH_REDIRECT_URI",
 ] as const;
 const workflowEnvAllowlist = [
   "PATH",
@@ -3169,7 +3180,12 @@ function accountsRuntimeEnv(input: {
 
   if (appHasBindingType(input.app, "install-launch-token@v1")) {
     const launchEnv = launchTokenConfigEnv(input.accounts);
-    for (const key of installLaunchOpaqueEnvKeys) {
+    for (
+      const key of [
+        ...installLaunchOpaqueEnvKeys,
+        ...installLaunchOpaquePassThroughEnvKeys,
+      ]
+    ) {
       const value = launchEnv[key];
       if (typeof value === "string" && value.length > 0) env[key] = value;
     }
