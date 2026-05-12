@@ -84,8 +84,8 @@ jobs:
       name: image
 ```
 
-See [Artifact URI Contract](./artifact-contract.md) for v1 marker, legacy v0,
-and failure semantics.
+See [Artifact URI Contract](./artifact-contract.md) for the v1 marker, and
+failure semantics.
 
 ## 5. Dry Run
 

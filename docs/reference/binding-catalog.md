@@ -65,7 +65,7 @@ compiler will invent values when no materializer supplied them.
 | 3 | `object-store.s3-compatible@v1` | data plane         | takosumi-cloud managed-object-store     | `BLOB_ENDPOINT` / `BLOB_BUCKET` / `BLOB_ACCESS_KEY` / `BLOB_SECRET_KEY`           |
 | 4 | `domain.http@v1`                | network            | takosumi-cloud domain manager + DNS     | (env 注入なし。`${bindings.<name>.url}` を manifest 側で参照)                     |
 | 5 | `deploy-intent.gitops@v1`       | deploy bridge      | takosumi-git deploy intent repo         | `DEPLOY_INTENT_DRIVER` / `DEPLOY_INTENT_REMOTE` / `DEPLOY_INTENT_TOKEN`           |
-| 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `INSTALL_LAUNCH_PUBLIC_KEY` / `INSTALL_LAUNCH_AUDIENCE`                           |
+| 6 | `install-launch-token@v1`       | identity bootstrap | Takosumi Accounts (launch token issuer) | `INSTALL_LAUNCH_PUBLIC_KEY` / `INSTALL_LAUNCH_AUDIENCE` / `INSTALL_LAUNCH_ISSUER` |
 
 binding type identifier の文法:
 
@@ -96,7 +96,7 @@ AppInstallation 単位で OIDC client を Takosumi Accounts に登録し、Takos
 | `redirectPaths`           | yes      | string[] (path) | AppInstallation の base URL に append される。例: `/auth/oidc/callback`    |
 | `allowedScopes`           | no       | string[]        | default `["openid", "email", "profile"]`                                   |
 | `subjectMode`             | no       | const           | `"pairwise"` 固定 (public は採用しない)                                    |
-| `tokenEndpointAuthMethod` | no       | enum            | `client_secret_basic` (default) / `client_secret_post` / `private_key_jwt` |
+| `tokenEndpointAuthMethod` | no       | enum            | `client_secret_basic` (default) / `client_secret_post` / `private_key_jwt` (future option、 現行 Accounts は未実装) |
 
 ### 1.2 Provisioned config
 

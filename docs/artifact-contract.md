@@ -62,19 +62,6 @@ be digest-pinned as `<image>@sha256:<64-hex>`. A resource can use
 `workflowRef.target` for provider-specific immutable artifact references that
 are not OCI image URIs.
 
-## Legacy v0 Contract
-
-v0 used the final non-empty stdout line as the artifact URI. It is retained for
-older projects through `--artifact-contract v0`:
-
-```bash
-takosumi-git push --artifact-contract v0
-```
-
-`--artifact-contract auto` first looks for the v1 `TAKOSUMI_ARTIFACT=<uri>`
-marker, then falls back to the v0 final non-empty stdout line. New projects
-scaffolded by `takosumi-git init` use v1 and should not rely on auto fallback.
-
 ## Stderr Handling
 
 The default executor captures stderr separately and appends it to logs after a
@@ -102,7 +89,6 @@ including symlink escapes, are rejected before execution.
 | A selected step exits non-zero             | `push` fails before POST and includes the job logs                                                               |
 | The job has no `artifact` field            | `push` fails before POST                                                                                         |
 | v1 job produces no marker                  | `push` fails with `workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI` |
-| v0 job produces no non-empty stdout line   | `push` fails with `workflow job '<job>' produced no stdout; cannot resolve artifact URI`                         |
 | `spec.image` URI is not digest-pinned      | `push` fails before POST                                                                                         |
 
 `--dry-run` still executes the workflow and resolves the URI, but it prints the
@@ -123,12 +109,6 @@ git commit SHA, artifact URI, provenance digest, and step log digests. The
 `POST /v1/deployments` body also includes a top-level
 `takosumi-git.deployment-provenance@v1` object. The Takosumi kernel persists
 that JSON as opaque WAL evidence; it does not execute or interpret the workflow.
-
-## Stability
-
-v1 is the default artifact URI contract. v0 remains a legacy resolver for the
-transition window and must be selected explicitly with `--artifact-contract v0`
-or `--artifact-contract auto`.
 
 ## Drift Check
 

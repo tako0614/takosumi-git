@@ -6,33 +6,6 @@
 spec は v1 の field 定義と `.takosumi/manifest.yml` (authoring compute manifest;
 compile 後に compiled Shape manifest になる) との関係を確定します。
 
-## このページで依存してよい範囲 / してはいけない範囲
-
-**依存してよい範囲**:
-
-- top-level field と nested field の存在 / 必須性 / 型 (§2〜§3)
-- `apiVersion` / `kind` の固定 literal (§1)
-- `bindings.<name>.type` の closed enum 6 種 (§3.5)
-- `permissions.requested` の closed enum 20 種 (§3.7)
-- `app.yml` が **kernel に渡らない** という不変条件 (§5)
-- `app.yml` (installer-bound) と `manifest.yml` (authoring compute manifest)
-  の関係 (§5)
-
-**依存してはいけない範囲**:
-
-- 各 binding type の詳細 schema (例: `database.postgres@v1` の `plan`) — Binding
-  Catalog 章 (Wave 1 Batch 1.4 で本文化) を参照
-- 各 grant capability の semantics — Grant catalog (Wave 1 Batch 1.4) を参照
-- `.takosumi/manifest.yml` (authoring compute manifest) の placeholder 文法 /
-  解決順序 —
-  [Manifest Reference](../../../takosumi/docs/reference/manifest-spec.md) を参照
-- AppInstallation REST API の wire shape — Takosumi Accounts docs を参照
-- takosumi-git installer pipeline の 13 step — Installer Pipeline 章
-  ([../architecture/installer-pipeline.md](../architecture/installer-pipeline.md))
-  を参照
-
----
-
 ## 1. `apiVersion` / `kind` の固定 literal
 
 ```yaml
@@ -45,8 +18,9 @@ kind: InstallableApp
 - `kind` は必ず `InstallableApp` の string 一致。他値は parser error です
 - 両 field は document の root に直接置きます。nested は不可です
 
-minor 互換拡張 (新 optional field の追加) は v1 のまま行います。 field の削除 /
-意味変更が必要な場合は `app.takosumi.dev/v2` への bump が 要ります。
+minor compatible extension (新 optional field の追加) は v1 のまま行います。
+field の削除 / 意味変更が必要な場合は `app.takosumi.dev/v2` への bump が
+要ります。
 
 ---
 
@@ -127,7 +101,7 @@ source:
 根拠は 本書および §22.1。install したものの中身を後から説明できる
 ようにするため、commit と manifest digest が命綱になります。source commit / app
 manifest digest / artifact digest / compiled manifest digest の chain は
-[Supply Chain Trust](../../../docs/reference/supply-chain-trust.md)
+[Supply Chain Trust](../../../takosumi/docs/reference/supply-chain-trust.md)
 を参照してください。
 
 ### 3.3 `entry`
@@ -221,16 +195,15 @@ install-launch-token@v1
 7 種目以降を追加するときは Binding Catalog の lockstep 拡張を要します (任意 type
 の発明は不可)。
 
-Operator / account plane / billing dependency は AppBinding type でも manifest
-import でもありません。OIDC は `operator.identity.oidc`、billing は
+Operator / account plane / billing dependency は AppBinding type
+ではありません。OIDC は `operator.identity.oidc`、billing は
 `operator.billing.default` の namespace export を Accounts / installer layer が
 explicit grant / account API / OIDC discovery / BillingPort で materialize
-します。 compiled manifest に `imports[]` / `serviceResolvers[]` /
-`${imports.*}` は残しません (must not remain)。
+します。compiled manifest には unresolved installer-only placeholder
+を残しません。
 
 `bindings.<name>` の `<name>` は、account-plane materializer が提供する
-`${bindings.<name>.<key>}` / `${secrets.<name>.<key>}` /
-`${refs.<name>.configRef}` / `${refs.<name>.secretRefs[0]}` reserved vocabulary
+`${bindings.<name>.<key>}` / `${secrets.<name>.<key>}`
 と紐づきます。`install apply` は Takosumi Accounts が所有する AppInstallation の
 materialization result で Accounts-backed placeholder を解決し、 deploy request
 build 後も unresolved installer-only placeholder が残る場合は kernel request
@@ -352,10 +325,10 @@ compatibility:
   kernel: ">=1.0.0"
 ```
 
-| field                        | 必須     | 制約                                                             |
-| ---------------------------- | -------- | ---------------------------------------------------------------- |
-| `compatibility.takosumi-git` | optional | semver range。takosumi-git installer 自身の version 要求         |
-| `compatibility.kernel`       | optional | semver range。takosumi kernel manifest envelope の semver 互換性 |
+| field                        | 必須     | 制約                                                                    |
+| ---------------------------- | -------- | ----------------------------------------------------------------------- |
+| `compatibility.takosumi-git` | optional | semver range。takosumi-git installer 自身の version 要求                |
+| `compatibility.kernel`       | optional | semver range。takosumi kernel manifest envelope の semver compatibility |
 
 不一致時は Install preview で warning、install は **block しません**。
 

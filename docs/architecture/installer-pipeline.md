@@ -27,9 +27,9 @@ Accounts です。
 ::: info Namespace exports takosumi-cloud / Takosumi Accounts 等の上位 surface
 は `operator.identity.oidc` / `operator.billing.default` /
 `operator.dashboard.web` / `operator.platform.deploy` の namespace export と
-account API / OIDC / BillingPort で参照します。kernel manifest に `imports[]` /
-`serviceResolvers[]` / signed `ServiceDescriptor` は入りません。 詳細は
-[Namespace Exports](../../../docs/reference/namespace-exports.md)。 :::
+account API / OIDC / BillingPort で参照します。kernel manifest には Shape
+resources だけを送ります。 詳細は
+[Namespace Exports](../../../takosumi/docs/reference/namespace-exports.md)。 :::
 
 ## 1. takosumi-git install pipeline (13 step)
 
@@ -210,13 +210,13 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 - compiled manifest への binding 値反映は **installer / account plane 内部**で
   行い、workflow からは触れない。
 - current `takosumi-git` は Accounts materialization 後に `${bindings.*}` /
-  `${secrets.*}` / `${refs.*}` / `${installation.*}` を解決する。未解決の
-  `${params.*}` / `${installation.*}` / `${artifacts.*}` / `${bindings.*}` /
-  `${secrets.*}` / `${refs.*}` や removed `${imports.*}` は kernel に渡さず、
-  deploy request build 時点で失敗させる。
+  `${secrets.*}` / `${installation.*}` を解決する。未解決の `${params.*}` /
+  `${installation.*}` / `${artifacts.*}` / `${bindings.*}` / `${secrets.*}` や
+  installer-only placeholders は kernel に渡さず、 deploy request build
+  時点で失敗させる。
 - kernel は manifest 内の installer-only placeholder を受け付けない。残り得る
   placeholder は `${ref:...}` / `${secret-ref:...}` の kernel-resolved
-  references だけ。`${imports.*}` は removed placeholder なので残らない。
+  references だけ。
 
 ## 6. Publisher verification
 
@@ -248,7 +248,7 @@ revoke 時の挙動:
 - revoke は InstallationEvent ledger に append-only で記録される。
 
 詳細な capability 一覧は
-[Binding Catalog](../../../docs/reference/binding-catalog.md) を参照。revoke API
+[Binding Catalog](../reference/binding-catalog.md) を参照。revoke API
 と AppGrant ledger は Takosumi Accounts が所有します。
 
 ## 次に読むページ
@@ -258,7 +258,7 @@ revoke 時の挙動:
 - [Takosumi Accounts](../../../takosumi-cloud/docs/architecture/takosumi-accounts.md)
   `POST /v1/install/preview` / `POST /v1/installations` と AppInstallation
   status の owner。
-- [Binding Catalog](../../../docs/reference/binding-catalog.md) step 10
+- [Binding Catalog](../reference/binding-catalog.md) step 10
   で注入される binding 種別と AppGrant の対応。
 - [Runtime Modes](../../../docs/platform/runtime-modes.md) step 13 で確定する
   `mode` 列の意味。

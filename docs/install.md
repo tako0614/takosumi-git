@@ -54,7 +54,6 @@ The preview response is `takosumi-git.install-preview@v1` and includes:
 - permission digest
 - risk reasons and `approvalRequired`
 - cost metadata
-- compatibility warnings
 
 The AppGrant catalog includes generic installer capabilities such as
 `deploy.intent.write` plus Takos resource scopes such as `files:read`,
@@ -110,7 +109,9 @@ materialized an OIDC client during create. When the app declares a required
 `install-launch-token@v1` binding, `--runtime-base-url` is supplied, and the
 kernel deploy is marked ready, `install apply` issues an install-bootstrap
 launch token and returns `launch.url` for the app's
-`install.postInstallLaunchPath`.
+`install.postInstallLaunchPath`. Pass `--launch-return-to /spaces/<id>/threads`
+when the post-install launch should create the app session and then open a
+specific in-app path such as the chat thread list.
 
 ## Apply
 
@@ -125,6 +126,7 @@ takosumi-git install \
   --subject tsub_... \
   --source-commit 0123456789abcdef0123456789abcdef01234567 \
   --runtime-base-url https://app.example.com \
+  --launch-return-to /spaces/space_.../threads \
   --mode shared-cell \
   --preview-id preview_... \
   --permission-digest sha256:... \
@@ -174,6 +176,12 @@ materialized into absolute redirect URIs and sent as an `oidcClients[]` request
 so Takosumi Accounts can create the per-installation OIDC client in the same
 ledger transaction.
 
+When `--launch-return-to` (or `TAKOSUMI_INSTALL_LAUNCH_RETURN_TO`) is supplied,
+takosumi-git adds that slash-prefixed path to the launch redirect URI as
+`return_to`. The installed app consumes the launch token at `/_takosumi/launch`,
+creates its session, strips the token from the browser URL, and redirects to
+that in-app path.
+
 `--mode` accepts `shared-cell`, `dedicated`, or `self-hosted`. When omitted,
 `install apply` uses the first value declared in `.takosumi/app.yml`
 `runtime.modes`; Takos-first apps should declare `shared-cell` first for the
@@ -187,10 +195,9 @@ POST /v1/deployments
 ```
 
 The kernel deploy step requires `--deploy-token` (or `TAKOSUMI_DEPLOY_TOKEN` /
-`TAKOSUMI_TOKEN`). The compiled manifest must already be a closed Shape
-manifest; `services[]`, `imports[]`, `serviceResolvers[]`, and `${imports.*}`
-are rejected before the kernel request. A kernel HTTP 4xx/5xx response makes the
-CLI exit non-zero.
+`TAKOSUMI_TOKEN`). The compiled manifest must already be a closed Shape manifest
+with installer-only placeholders resolved. A kernel HTTP 4xx/5xx response makes
+the CLI exit non-zero.
 
 After the kernel response, `install apply` calls Takosumi Accounts to transition
 the AppInstallation ledger:
@@ -222,13 +229,12 @@ original approval evidence.
 When `install apply` also deploys to a kernel endpoint, takosumi-git uses the
 Accounts create response (`binding_env`, OIDC client material, and
 `GET /v1/installations/{id}/launch-token` public config) to resolve explicit
-`${bindings.*}`, `${secrets.*}`, `${refs.*}`, and `${installation.*}`
-placeholders, then inject missing default runtime environment values into
-compute resources before `POST /v1/deployments`. `${refs.<binding>.configRef}`
-and `${refs.<binding>.secretRefs[0]}` expose Accounts-owned materialized
-AppBinding refs, never pending `takosumi-git://...` approval refs. Explicit
-`env:` keys in the manifest win after their supported placeholders are resolved;
-only missing keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
+`${bindings.*}`, `${secrets.*}`, and `${installation.*}` placeholders, then
+inject missing default runtime environment values into compute resources before
+`POST /v1/deployments`. Materialized AppBinding refs stay in Accounts-owned
+config / secret records; they are not manifest placeholders. Explicit `env:`
+keys in the manifest win after their supported placeholders are resolved; only
+missing keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
 `OIDC_REDIRECT_URI`, `DATABASE_URL`, `BLOB_*`, `DEPLOY_INTENT_*`,
 `TAKOS_INSTALLATION_ID`, and `INSTALL_LAUNCH_*` are filled.
 
@@ -248,8 +254,7 @@ and Accounts lifecycle API access are resolved through namespace exports such as
 `operator.identity.oidc`, `operator.billing.default`, `operator.dashboard.web`,
 and `operator.platform.deploy`. takosumi-git may ask Takosumi Accounts to
 materialize the resulting OIDC client, launch token, grant, or billing/reporting
-contract, but it must not write manifest-level `imports[]` or
-`serviceResolvers[]`.
+contract. Kernel manifests remain Shape-only.
 
 The kernel receives only the compiled Shape manifest; `.takosumi/app.yml` itself
 remains installer metadata.
@@ -273,14 +278,14 @@ workflow step runs.
 
 Compiled manifests must not carry installer-only placeholders.
 `takosumi-git install apply` resolves Accounts-backed `${bindings.*}`,
-`${secrets.*}`, `${refs.*}`, and `${installation.*}` values after the Takosumi
-Accounts install API creates the AppInstallation record and before kernel
-deploy. If `.takosumi/manifest.yml` still contains `${params.*}`,
-`${installation.*}`, `${artifacts.*}`, `${bindings.*}`, `${secrets.*}`,
-`${refs.*}`, or removed `${imports.*}` references after the deploy request
-build, `takosumi-git install apply` fails before `POST /v1/deployments`.
-`takosumi-git push` has no Accounts materialization phase, so it fails before
-deploy when those installer-only placeholders are present.
+`${secrets.*}`, and `${installation.*}` values after the Takosumi Accounts
+install API creates the AppInstallation record and before kernel deploy. If
+`.takosumi/manifest.yml` still contains `${params.*}`, `${installation.*}`,
+`${artifacts.*}`, `${bindings.*}`, `${secrets.*}`, or installer-only placeholder
+references after the deploy request build, `takosumi-git install apply` fails
+before `POST /v1/deployments`. `takosumi-git push` has no Accounts
+materialization phase, so it fails before deploy when those installer-only
+placeholders are present.
 
 ## Commit Pins
 

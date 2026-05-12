@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 
 const root = new URL("../", import.meta.url);
 
-Deno.test("artifact contract documents v1 marker resolver and v0 fallback", async () => {
+Deno.test("artifact contract documents v1 marker resolver", async () => {
   const doc = await read("docs/artifact-contract.md");
   const pushSource = await read("packages/cli/src/push.ts");
 
@@ -13,7 +13,6 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
       "workflowRef.target",
       "spec.artifact.hash",
       "TAKOSUMI_ARTIFACT=<uri>",
-      "final non-empty stdout line",
       "[stderr]",
       "cleared process",
       "path inside `.takosumi/workflows`",
@@ -23,7 +22,6 @@ Deno.test("artifact contract documents v1 marker resolver and v0 fallback", asyn
       "<image>@sha256:<64-hex>",
       "`spec.image` URI is not digest-pinned",
       "workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI",
-      "workflow job '<job>' produced no stdout; cannot resolve artifact URI",
       "artifactContractResolver",
       "lastLineArtifactResolver",
       "parseArtifactContract",
