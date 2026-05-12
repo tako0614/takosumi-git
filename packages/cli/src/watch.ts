@@ -147,6 +147,14 @@ async function dispatchPush(input: {
       );
       return { commit: input.commit };
     }
+    const budgetGuard = evaluateBudgetGuard(intent);
+    if (budgetGuard.requiresApproval && !budgetGuard.approved) {
+      throw new Error(
+        `deploy intent ${intent.id} requires budget guard approval: ${
+          budgetGuard.reasons.join(", ")
+        }`,
+      );
+    }
     const result = await input.postDeploymentImpl({
       endpoint: input.options.endpoint,
       token: input.options.token,
@@ -189,6 +197,7 @@ function absoluteFromCwd(cwd: string, path: string): string {
 interface DeployIntentDocument {
   readonly id: string;
   readonly mode: DeployMode;
+  readonly metadata?: Record<string, unknown>;
   readonly manifest: ManifestEnvelope;
 }
 
@@ -239,8 +248,92 @@ function parseDeployIntentDocument(text: string): DeployIntentDocument {
   return {
     id: value.id,
     mode,
+    ...(isRecord(value.metadata) ? { metadata: value.metadata } : {}),
     manifest: value.manifest as unknown as ManifestEnvelope,
   };
+}
+
+function evaluateBudgetGuard(intent: DeployIntentDocument): {
+  readonly requiresApproval: boolean;
+  readonly approved: boolean;
+  readonly reasons: readonly string[];
+} {
+  const reasons = budgetGuardReasons(intent.manifest);
+  return {
+    requiresApproval: reasons.length > 0,
+    approved: isBudgetGuardApproved(intent.metadata),
+    reasons,
+  };
+}
+
+function isBudgetGuardApproved(
+  metadata: Record<string, unknown> | undefined,
+): boolean {
+  const guard = isRecord(metadata?.budgetGuard) ? metadata.budgetGuard : null;
+  return isRecord(guard) && guard.approved === true;
+}
+
+function budgetGuardReasons(manifest: ManifestEnvelope): string[] {
+  const resources = Array.isArray(manifest.resources) ? manifest.resources : [];
+  const reasons: string[] = [];
+  for (const resource of resources) {
+    if (!isRecord(resource)) continue;
+    const name = typeof resource.name === "string" ? resource.name : "resource";
+    const spec = isRecord(resource.spec) ? resource.spec : {};
+    if (hasExpensiveAccelerator(spec)) {
+      reasons.push(`${name} requests accelerator/GPU capacity`);
+    }
+    const instanceCount = numericProperty(
+      spec,
+      "instances",
+      "replicas",
+      "replicaCount",
+    );
+    if (instanceCount !== undefined && instanceCount > 10) {
+      reasons.push(`${name} requests ${instanceCount} instances`);
+    }
+  }
+  return reasons;
+}
+
+function hasExpensiveAccelerator(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasExpensiveAccelerator);
+  if (!isRecord(value)) return false;
+  for (const [key, entry] of Object.entries(value)) {
+    const normalized = key.toLowerCase();
+    if (
+      (normalized.includes("gpu") || normalized.includes("accelerator")) &&
+      isTruthyBudgetValue(entry)
+    ) {
+      return true;
+    }
+    if (isRecord(entry) || Array.isArray(entry)) {
+      if (hasExpensiveAccelerator(entry)) return true;
+    }
+  }
+  return false;
+}
+
+function isTruthyBudgetValue(value: unknown): boolean {
+  if (value === null || value === undefined || value === false) return false;
+  if (typeof value === "number") return value > 0;
+  if (typeof value === "string") {
+    return value.trim().length > 0 &&
+      value !== "0" && value !== "false";
+  }
+  if (Array.isArray(value)) return value.length > 0;
+  return true;
+}
+
+function numericProperty(
+  value: Record<string, unknown>,
+  ...keys: string[]
+): number | undefined {
+  for (const key of keys) {
+    const entry = value[key];
+    if (typeof entry === "number" && Number.isFinite(entry)) return entry;
+  }
+  return undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -394,7 +394,11 @@ bindings:
   "mode": "apply",
   "metadata": {
     "spaceId": "space_1",
-    "group": "docs"
+    "group": "docs",
+    "budgetGuard": {
+      "approved": true,
+      "approvalId": "approval_01HR..."
+    }
   },
   "manifest": {
     "apiVersion": "1.0",
@@ -407,12 +411,16 @@ bindings:
 `mode` は `apply` / `plan` / `destroy` のいずれかで、省略時は
 `apply`。`manifest` は takosumi kernel `POST /v1/deployments` に渡せる compile
 済み Manifest envelope で、kernel-resolved reference 以外の installer-only
-placeholder を含めない。
+placeholder を含めない。GPU / accelerator 指定、または `instances` / `replicas`
+/ `replicaCount` が 10 を超える resource を含む場合、 watcher は
+`metadata.budgetGuard.approved: true` が無い deploy intent を kernel
+に送らない。
 
 セキュリティ要件:
 
 - token は `writePathPrefix` 配下にのみ push 可能 (server-side path-based ACL)
-- workflow run は budget guard を必ず通過
+- deploy intent は budget guard を必ず通過し、高額 resource は approval 前に
+  kernel apply されない
 - workflow が触れる kernel resource は AppInstallation の grant
   `deploy.intent.write` に制限
 

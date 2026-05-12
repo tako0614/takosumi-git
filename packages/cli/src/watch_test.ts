@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { join, resolve } from "@std/path";
 import { parseWatchArgs, watchDeployIntentRepo } from "./watch.ts";
 
@@ -191,6 +191,151 @@ Deno.test("watchDeployIntentRepo dispatches latest deploy intent document", asyn
       ),
       true,
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("watchDeployIntentRepo blocks high-cost deploy intents before kernel apply", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-budget-" });
+  const commits = [
+    "ffffffffffffffffffffffffffffffffffffffff",
+    "9999999999999999999999999999999999999999",
+  ];
+  let headReads = 0;
+  let postCalls = 0;
+  try {
+    await Deno.mkdir(join(root, "deployments"), { recursive: true });
+    await Deno.writeTextFile(
+      join(root, "deployments", "gpu.json"),
+      JSON.stringify({
+        kind: "takos.deploy-intent@v1",
+        id: "gpu-intent",
+        manifest: {
+          apiVersion: "1.0",
+          kind: "Manifest",
+          resources: [{
+            shape: "worker@v1",
+            name: "trainer",
+            provider: "container",
+            spec: { gpu: true, instances: 12 },
+          }],
+        },
+      }),
+    );
+
+    await assertRejects(
+      () =>
+        watchDeployIntentRepo({
+          cwd: root,
+          endpoint: "http://kernel.example",
+          token: "deploy-token",
+          manifestPath: ".takosumi/manifest.yml",
+          workflowsDir: ".takosumi/workflows",
+          intentPathPrefix: "deployments",
+          mode: "apply",
+          artifactContract: "v1",
+          dryRun: false,
+          pollIntervalMs: 1,
+          once: true,
+          git: () => {
+            const commit = commits[Math.min(headReads, commits.length - 1)];
+            headReads += 1;
+            return Promise.resolve({ code: 0, stdout: `${commit}\n` });
+          },
+          sleep: () => Promise.resolve(),
+          stdout: () => {},
+          pushImpl: () => {
+            throw new Error(
+              "pushImpl must not run for deploy intent documents",
+            );
+          },
+          postDeploymentImpl: () => {
+            postCalls += 1;
+            return Promise.resolve({
+              status: 202,
+              body: { ok: true },
+              attempts: 1,
+              idempotencyKey: "unexpected",
+            });
+          },
+        }),
+      Error,
+      "requires budget guard approval",
+    );
+    assertEquals(postCalls, 0);
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("watchDeployIntentRepo allows approved high-cost deploy intents", async () => {
+  const root = await Deno.makeTempDir({ prefix: "takosumi-git-budget-ok-" });
+  let headReads = 0;
+  let postCalls = 0;
+  try {
+    await Deno.mkdir(join(root, "deployments"), { recursive: true });
+    await Deno.writeTextFile(
+      join(root, "deployments", "gpu-approved.json"),
+      JSON.stringify({
+        kind: "takos.deploy-intent@v1",
+        id: "gpu-approved",
+        metadata: {
+          budgetGuard: {
+            approved: true,
+            approvalId: "approval-1",
+          },
+        },
+        manifest: {
+          apiVersion: "1.0",
+          kind: "Manifest",
+          resources: [{
+            shape: "worker@v1",
+            name: "trainer",
+            provider: "container",
+            spec: { gpu: true, instances: 12 },
+          }],
+        },
+      }),
+    );
+
+    const result = await watchDeployIntentRepo({
+      cwd: root,
+      endpoint: "http://kernel.example",
+      token: "deploy-token",
+      manifestPath: ".takosumi/manifest.yml",
+      workflowsDir: ".takosumi/workflows",
+      intentPathPrefix: "deployments",
+      mode: "apply",
+      artifactContract: "v1",
+      dryRun: false,
+      pollIntervalMs: 1,
+      once: true,
+      git: () => {
+        const commit = headReads === 0
+          ? "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          : "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        headReads += 1;
+        return Promise.resolve({ code: 0, stdout: `${commit}\n` });
+      },
+      sleep: () => Promise.resolve(),
+      stdout: () => {},
+      pushImpl: () => {
+        throw new Error("pushImpl must not run for deploy intent documents");
+      },
+      postDeploymentImpl: () => {
+        postCalls += 1;
+        return Promise.resolve({
+          status: 202,
+          body: { ok: true },
+          attempts: 1,
+          idempotencyKey: "approved",
+        });
+      },
+    });
+
+    assertEquals(result.deployments[0]?.status, 202);
+    assertEquals(postCalls, 1);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
