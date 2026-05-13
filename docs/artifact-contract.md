@@ -70,11 +70,14 @@ stdout だけを読みます。stderr に URI を出力しても contract を満
 ## Build 環境
 
 既定の workflow executor は build step を空の環境変数で起動し、shell tool と
-temporary directory を見つけるための小さな allowlist のみを継承します (`PATH` /
-`HOME` / `TMPDIR` / `TMP` / `TEMP` / `USER` / `LOGNAME` / `SHELL` / `LANG` /
-`LC_ALL` / `TERM`)。`TAKOS_TOKEN` / `TAKOSUMI_TOKEN` / `OIDC_CLIENT_SECRET` /
-`DATABASE_URL` のような runtime credential や operator token は workflow step
-に継承されません。publish credential は将来の明示的な build-secret
+temporary directory を見つけるための小さな共有 allowlist のみを継承します
+(`PATH` / `HOME` / `TMPDIR` / `TMP` / `TEMP` / `USER` / `LOGNAME` / `SHELL` /
+`LANG` / `LC_ALL` / `TERM`)。`TAKOS_TOKEN` / `TAKOSUMI_TOKEN` /
+`TAKOSUMI_DEPLOY_TOKEN` / `OIDC_CLIENT_SECRET` / `DATABASE_URL` /
+`AWS_SECRET_ACCESS_KEY` / `CLOUDFLARE_API_TOKEN` のような runtime credential や
+operator token は workflow step に継承されません。この allowlist と credential
+遮断は CLI の shared sandbox module と push/install executor tests
+で固定されます。 publish credential は将来の明示的な build-secret
 機構経由で渡し、operator process の環境変数経由では渡しません。
 `workflowRef.file` は `.takosumi/workflows` 内の相対パスでなければならず、
 workflows ディレクトリの外を指すパス (symlink escape を含む) は実行前に

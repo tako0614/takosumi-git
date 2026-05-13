@@ -26,9 +26,9 @@ import {
   type ArtifactResolver,
   runWorkflow,
   type StepExecutor,
-  type StepOutcome,
 } from "@takos/takosumi-git-workflow-runner";
 import { resolveWorkflowFilePath } from "./workflow_path.ts";
+import { createWorkflowStepExecutor } from "./workflow_sandbox.ts";
 
 export const INSTALLABLE_APP_API_VERSION = "app.takosumi.dev/v1";
 export const INSTALLABLE_APP_KIND = "InstallableApp";
@@ -272,19 +272,6 @@ const installLaunchOpaqueEnvKeys = [
 // these at runtime, so absence is not a hard failure.
 const installLaunchOpaquePassThroughEnvKeys = [
   "INSTALL_LAUNCH_REDIRECT_URI",
-] as const;
-const workflowEnvAllowlist = [
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "TERM",
 ] as const;
 const semverTagPattern = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 const releaseTagPattern = /^release[/-][0-9][0-9A-Za-z._-]*$/;
@@ -1382,7 +1369,7 @@ async function compileInstallWorkflowRefs(input: {
   const manifest = structuredClone(input.compiled.manifest);
   const entries = installWorkflowResourceEntries(manifest);
   const executorFactory = input.executorFactory ??
-    ((projectRoot: string) => defaultInstallStepExecutor(projectRoot));
+    ((projectRoot: string) => createWorkflowStepExecutor(projectRoot));
 
   for (const entry of entries) {
     const workflowPath = await resolveWorkflowFilePath(
@@ -1601,38 +1588,6 @@ function validateInstallManifestImagePins(
       `manifest.resources[${index}].spec.image must be digest-pinned as <image>@sha256:<64-hex>`,
     );
   }
-}
-
-function defaultInstallStepExecutor(cwd: string): StepExecutor {
-  return async (run, _context): Promise<StepOutcome> => {
-    const command = new Deno.Command("bash", {
-      args: ["-lc", run],
-      cwd,
-      clearEnv: true,
-      env: installWorkflowSandboxEnv(),
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code, stdout, stderr } = await command.output();
-    const out = new TextDecoder().decode(stdout);
-    const err = new TextDecoder().decode(stderr);
-    return {
-      stdout: err.length > 0 ? `${out}\n[stderr]\n${err}` : out,
-      exitCode: code,
-    };
-  };
-}
-
-function installWorkflowSandboxEnv(): Record<string, string> {
-  const env: Record<string, string> = {
-    PATH: "/usr/local/bin:/usr/bin:/bin",
-  };
-  for (const key of workflowEnvAllowlist) {
-    if (key === "PATH") continue;
-    const value = Deno.env.get(key);
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
 }
 
 async function tryRead(path: string): Promise<string | undefined> {

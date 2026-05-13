@@ -193,6 +193,10 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 
 - runtime secrets は **一切渡さない** (`OIDC_CLIENT_SECRET` / database password
   / object store key など)。
+- default CLI executor は共有 allowlist 実装で `PATH` / `HOME` / temporary
+  directory / locale / terminal 関連の最小 env だけを渡す。Takosumi / provider /
+  runtime credential は `workflow_sandbox_test.ts`、`push_test.ts`、
+  `install_test.ts` で継承しないことを固定する。
 - `workflowRef.file` は `.takosumi/workflows` 内の relative path に限定し、
   `../` escape / absolute path / symlink escape は workflow 実行前に拒否する。
 - untrusted Git repo には operator 側の container / VM runner で network egress

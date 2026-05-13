@@ -5,6 +5,7 @@ const root = new URL("../", import.meta.url);
 Deno.test("artifact contract documents v1 marker resolver", async () => {
   const doc = await read("docs/artifact-contract.md");
   const pushSource = await read("packages/cli/src/push.ts");
+  const sandboxSource = await read("packages/cli/src/workflow_sandbox.ts");
 
   for (
     const snippet of [
@@ -34,8 +35,7 @@ Deno.test("artifact contract documents v1 marker resolver", async () => {
   for (
     const snippet of [
       "ARTIFACT_MARKER_PREFIX",
-      "clearEnv: true",
-      "WORKFLOW_ENV_ALLOWLIST",
+      "createWorkflowStepExecutor",
       "resolveWorkflowFilePath",
       "validateResolvedArtifactTarget",
       "spec.image artifacts must be digest-pinned",
@@ -49,6 +49,22 @@ Deno.test("artifact contract documents v1 marker resolver", async () => {
     ]
   ) {
     assert.ok(pushSource.includes(snippet), `source missing ${snippet}`);
+  }
+
+  for (
+    const snippet of [
+      "clearEnv: true",
+      "WORKFLOW_SANDBOX_ENV_ALLOWLIST",
+      "WORKFLOW_SANDBOX_CREDENTIAL_KEYS",
+      "TAKOSUMI_DEPLOY_TOKEN",
+      "AWS_SECRET_ACCESS_KEY",
+      "CLOUDFLARE_API_TOKEN",
+    ]
+  ) {
+    assert.ok(
+      sandboxSource.includes(snippet),
+      `sandbox source missing ${snippet}`,
+    );
   }
 });
 

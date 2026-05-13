@@ -47,7 +47,6 @@ import {
   type ArtifactResolver,
   runWorkflow,
   type StepExecutor,
-  type StepOutcome,
 } from "@takos/takosumi-git-workflow-runner";
 import {
   assertNoForbiddenKernelManifestFields,
@@ -55,6 +54,7 @@ import {
   compileInstallManifest,
   parseInstallableAppYaml,
 } from "./install.ts";
+import { createWorkflowStepExecutor } from "./workflow_sandbox.ts";
 import { resolveWorkflowFilePath } from "./workflow_path.ts";
 
 export interface PushOptions {
@@ -99,53 +99,10 @@ export type GitRunner = (
 const DEFAULT_ARTIFACT_CONTRACT: ArtifactContract = "v1";
 const ARTIFACT_MARKER_PREFIX = "TAKOSUMI_ARTIFACT=";
 const digestPinnedImagePattern = /^.+@sha256:[0-9a-f]{64}$/;
-const WORKFLOW_ENV_ALLOWLIST = [
-  "PATH",
-  "HOME",
-  "TMPDIR",
-  "TMP",
-  "TEMP",
-  "USER",
-  "LOGNAME",
-  "SHELL",
-  "LANG",
-  "LC_ALL",
-  "TERM",
-] as const;
 
 /** Default executor: spawns `bash -lc <run>` from `cwd`. */
 export function defaultStepExecutor(cwd: string): StepExecutor {
-  return async (run, _ctx): Promise<StepOutcome> => {
-    const cmd = new Deno.Command("bash", {
-      args: ["-lc", run],
-      cwd,
-      clearEnv: true,
-      env: workflowSandboxEnv(),
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { code, stdout, stderr } = await cmd.output();
-    const decoder = new TextDecoder();
-    const out = decoder.decode(stdout);
-    const err = decoder.decode(stderr);
-    // Surface stderr by appending it to stdout for log capture; downstream
-    // artifact resolution only reads stdout proper, so we keep them separated
-    // by a marker.
-    const merged = err.length > 0 ? `${out}\n[stderr]\n${err}` : out;
-    return { stdout: merged, exitCode: code };
-  };
-}
-
-function workflowSandboxEnv(): Record<string, string> {
-  const env: Record<string, string> = {
-    PATH: "/usr/local/bin:/usr/bin:/bin",
-  };
-  for (const key of WORKFLOW_ENV_ALLOWLIST) {
-    if (key === "PATH") continue;
-    const value = Deno.env.get(key);
-    if (value !== undefined) env[key] = value;
-  }
-  return env;
+  return createWorkflowStepExecutor(cwd);
 }
 
 function stdoutLines(text: string): string[] {
