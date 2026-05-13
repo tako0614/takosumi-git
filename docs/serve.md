@@ -44,8 +44,9 @@ webhook リクエストは設定された HMAC-SHA256 シークレットで body
 署名検証後、event header が明示されている場合は push 系 event のみを
 ディスパッチします。GitHub / Gitea は `push`、GitLab は `Push Hook` または
 `Tag Push Hook` を受け付けます。`ping` や pull request などの非 push event は
-`202` と `ignored: true` を返し、キューには積みません。互換性のため、event
-header がない既存 webhook は従来通り push payload として扱います。
+`202` と `ignored: true` を返し、キューには積みません。event header がない
+request は current implementation では generic push payload として扱いますが、
+pre-GA の互換保証ではありません。
 
 ## キューと重複排除
 
