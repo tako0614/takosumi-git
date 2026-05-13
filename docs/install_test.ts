@@ -138,9 +138,17 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
   assert.ok(serveSource.includes("/v1/install/revision/apply"));
   assert.ok(serveSource.includes("handleInstallRevisionRequest"));
 
-  assert.ok(mainSource.includes("install     Install .takosumi/app.yml"));
+  assert.ok(
+    mainSource.includes(
+      "install     Preview/apply .takosumi/app.yml as an AppInstallation",
+    ),
+  );
   assert.ok(mainSource.includes("materialize Request shared-cell"));
-  assert.ok(mainSource.includes("export      Request a self-host"));
+  assert.ok(
+    mainSource.includes(
+      "export      Request or download a self-host export bundle operation",
+    ),
+  );
   assert.ok(mainSource.includes("--output <path>"));
   assert.ok(mainSource.includes("--source-commit <sha>"));
   assert.ok(mainSource.includes("--ref <ref>"));

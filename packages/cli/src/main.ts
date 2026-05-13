@@ -31,12 +31,12 @@ USAGE:
 COMMANDS:
   init        Scaffold .takosumi/app.yml, manifest.yml, and workflows
   push        Resolve .takosumi/manifest.yml + workflows and submit to takosumi
-  install     Install .takosumi/app.yml metadata from a local repo or Git URL
-  import      Import a portable AppInstallation export bundle
-  upgrade     Preview or apply an AppInstallation source revision
-  rollback    Preview or apply an AppInstallation rollback revision
-  materialize Request shared-cell to dedicated materialization
-  export      Request a self-host export bundle operation
+  install     Preview/apply .takosumi/app.yml as an AppInstallation
+  import      Import a portable AppInstallation export bundle into Accounts
+  upgrade     Preview/apply an AppInstallation source revision
+  rollback    Preview/apply an AppInstallation rollback revision
+  materialize Request shared-cell to dedicated materialization in Accounts
+  export      Request or download a self-host export bundle operation
   watch       Poll a deployment repo and push when HEAD changes
   serve       Run a webhook receiver that auto-pushes on git events
   history     Show manifest version history
@@ -76,10 +76,15 @@ INSTALL OPTIONS:
   --runtime-base-url <url>     app runtime base URL for OIDC redirects
   --endpoint <url>             takosumi kernel endpoint for deploy
   --deploy-token <token>       kernel deploy token
-  --json                       print preview JSON
+  --launch-return-to <path>    app path to open after launch token session creation
+  --preview-id <id>            approved preview id for apply
+  --permission-digest <sha256:...>
+                               approved permission digest for apply
+  --cost-ack                   acknowledge metered binding cost for apply
+  --json                       print preview/apply JSON
 
 IMPORT OPTIONS:
-  import <bundle.json|bundle.tar.zst>
+  import <bundle.json|bundle.tar.zst|bundle.tar.zst.age>
                                import an AppInstallation export bundle
   --to <url>                   target Takosumi Accounts URL
   --accounts-url <url>         alias for --to
@@ -90,6 +95,7 @@ IMPORT OPTIONS:
   --installation-id <id>       target installation id
   --mode <mode>                dedicated | self-hosted
   --identity <path[,path]>     age identity file(s) for .tar.zst.age bundles
+  --restore-data               restore bundle data entries when target supports it
   --json                       print JSON
 
 UPGRADE / ROLLBACK OPTIONS:
@@ -132,6 +138,13 @@ SERVE OPTIONS:
                                artifact URI resolver for dispatched push
   --rate-limit <n>             max requests per rate window (default 60)
   --rate-limit-window-ms <n>   rate window milliseconds (default 60000)
+  --accounts-url <url>         Takosumi Accounts URL for webhook install mode
+  --accounts-token <token>     Accounts bearer for webhook install mode
+  --account-id <id>            ledger account id for webhook install mode
+  --space-id <id>              target space id for webhook install mode
+  --subject <tsub_...>         installer subject for webhook install mode
+  --runtime-base-url <url>     app runtime base URL for webhook install mode
+  --deploy-token <token>       kernel deploy token for webhook install mode
 
 WATCH OPTIONS:
   --cwd <dir>                  deployment repo root (default .)

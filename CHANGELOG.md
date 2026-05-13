@@ -17,6 +17,11 @@ the package version of `@takos/takosumi-git-cli`.
 - Implemented `takosumi-git serve` with GitHub / GitLab / Gitea webhook routes,
   HMAC-SHA256 verification, in-memory rate limiting, delivery dedup, queue
   draining, and webhook-triggered push dispatch.
+- Polished install UX docs/help for the current AppInstallation path:
+  `install preview/apply`, approval evidence (`--preview-id`,
+  `--permission-digest`, `--cost-ack`), launch-token return paths, revision
+  upgrade/rollback, materialize/export, and portable import are all documented
+  from the top-level CLI help.
 
 ## 0.3.0
 
