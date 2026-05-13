@@ -309,9 +309,11 @@ bindings:
     tlsMode: managed
 ```
 
-[materialize](../../../takos/docs/platform/upgrade-export.md#materialize) は
-**hostname を変えない** ことを保証する (routing target だけ shared-cell から
-dedicated に切り替える)。
+[materialize](../../../takos/docs/platform/upgrade-export.md#materialize) の
+target contract は **hostname を変えない** ことです (routing target だけ
+shared-cell から dedicated に切り替える)。public managed offering での live
+cutover / rollback continuity proof は ROADMAP §3.5 の operator evidence
+で扱います。
 
 ## 5. `deploy-intent.gitops@v1`
 
