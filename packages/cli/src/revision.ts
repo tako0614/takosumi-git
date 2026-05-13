@@ -471,7 +471,89 @@ async function fetchInstallation(input: {
   if (response.status >= 400) {
     throw new RevisionApplyError("fetch", response.status, body);
   }
-  return body as AccountsInstallationEnvelope;
+  return parseAccountsInstallationEnvelope(body);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nullableString(value: unknown): string | null | undefined {
+  if (value === null) return null;
+  if (typeof value === "string") return value;
+  return undefined;
+}
+
+function parseAccountsInstallationEnvelope(
+  body: unknown,
+): AccountsInstallationEnvelope {
+  if (!isRecord(body)) {
+    throw new Error("accounts installation response must be a JSON object");
+  }
+  const installation = body.installation;
+  if (!isRecord(installation)) {
+    throw new Error("accounts installation response missing 'installation'");
+  }
+  if (
+    typeof installation.id !== "string" ||
+    typeof installation.app_id !== "string" ||
+    typeof installation.status !== "string"
+  ) {
+    throw new Error(
+      "accounts installation envelope missing id / app_id / status",
+    );
+  }
+  const source = installation.source;
+  if (
+    !isRecord(source) ||
+    typeof source.url !== "string" ||
+    typeof source.ref !== "string" ||
+    typeof source.commit !== "string"
+  ) {
+    throw new Error(
+      "accounts installation envelope missing source { url, ref, commit }",
+    );
+  }
+  const bindings = Array.isArray(body.bindings)
+    ? body.bindings.flatMap((entry) =>
+      isRecord(entry)
+        ? [{
+          name: typeof entry.name === "string" ? entry.name : undefined,
+          kind: typeof entry.kind === "string" ? entry.kind : undefined,
+        }]
+        : []
+    )
+    : undefined;
+  const grants = Array.isArray(body.grants)
+    ? body.grants.flatMap((entry) =>
+      isRecord(entry)
+        ? [{
+          capability: typeof entry.capability === "string"
+            ? entry.capability
+            : undefined,
+          revoked_at: nullableString(entry.revoked_at),
+        }]
+        : []
+    )
+    : undefined;
+  return {
+    installation: {
+      id: installation.id,
+      app_id: installation.app_id,
+      source: {
+        url: source.url,
+        ref: source.ref,
+        commit: source.commit,
+      },
+      app_manifest_digest: nullableString(installation.app_manifest_digest),
+      compiled_manifest_digest: nullableString(
+        installation.compiled_manifest_digest,
+      ),
+      status: installation.status,
+    },
+    bindings,
+    grants,
+  };
 }
 
 function renderRevisionResult(result: RevisionResult): string {
