@@ -137,6 +137,44 @@ Deno.test("serve verifies GitHub webhook and dispatches push event", async () =>
   assertEquals(dispatches[0].event.source, "acme/demo@refs/heads/main");
 });
 
+Deno.test("serve ignores signed non-push webhook events", async () => {
+  const cases = [
+    {
+      provider: "github",
+      headers: { "x-github-event": "ping" },
+    },
+    {
+      provider: "gitlab",
+      headers: { "x-gitlab-event": "Merge Request Hook" },
+    },
+    {
+      provider: "gitea",
+      headers: { "x-gitea-event": "pull_request" },
+    },
+  ] as const;
+
+  for (const testCase of cases) {
+    const dispatches: WebhookDispatchJob[] = [];
+    const handler = createServeHandler(baseOptions(dispatches));
+    const response = await handler(
+      await signedRequest(
+        testCase.provider,
+        { ref: "refs/heads/main", after: "abc123" },
+        testCase.headers,
+      ),
+    );
+
+    assertEquals(response.status, 202);
+    assertEquals(await response.json(), {
+      ok: true,
+      queued: false,
+      ignored: true,
+      reason: "unsupported_event",
+    });
+    assertEquals(dispatches.length, 0);
+  }
+});
+
 Deno.test("serve rejects invalid signatures before dispatch", async () => {
   const dispatches: WebhookDispatchJob[] = [];
   const handler = createServeHandler(baseOptions(dispatches));

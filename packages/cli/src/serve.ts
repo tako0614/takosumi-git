@@ -135,6 +135,36 @@ function signatureHeader(provider: WebhookProvider, headers: Headers): string {
   }
 }
 
+function webhookEventHeader(
+  provider: WebhookProvider,
+  headers: Headers,
+): string {
+  switch (provider) {
+    case "github":
+      return headerValue(headers, "x-github-event");
+    case "gitea":
+      return headerValue(headers, "x-gitea-event") ||
+        headerValue(headers, "x-github-event");
+    case "gitlab":
+      return headerValue(headers, "x-gitlab-event");
+  }
+}
+
+function isPushWebhookEvent(
+  provider: WebhookProvider,
+  headers: Headers,
+): boolean {
+  const event = webhookEventHeader(provider, headers).trim().toLowerCase();
+  if (!event) return true;
+  switch (provider) {
+    case "github":
+    case "gitea":
+      return event === "push";
+    case "gitlab":
+      return event === "push hook" || event === "tag push hook";
+  }
+}
+
 export async function verifyWebhookSignature(
   provider: WebhookProvider,
   secret: string,
@@ -347,6 +377,15 @@ export function createServeHandler(
       rawBody,
     );
     if (!verified) return json({ error: "invalid_signature" }, 401);
+
+    if (!isPushWebhookEvent(provider, request.headers)) {
+      return json({
+        ok: true,
+        queued: false,
+        ignored: true,
+        reason: "unsupported_event",
+      }, 202);
+    }
 
     let body: unknown;
     try {

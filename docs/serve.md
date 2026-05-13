@@ -41,6 +41,12 @@ webhook リクエストは設定された HMAC-SHA256 シークレットで body
 | GitLab   | `X-Gitlab-Signature-256: sha256=<hex>`                             |
 | Gitea    | `X-Gitea-Signature-256: sha256=<hex>` または `X-Hub-Signature-256` |
 
+署名検証後、event header が明示されている場合は push 系 event のみを
+ディスパッチします。GitHub / Gitea は `push`、GitLab は `Push Hook` または
+`Tag Push Hook` を受け付けます。`ping` や pull request などの非 push event は
+`202` と `ignored: true` を返し、キューには積みません。互換性のため、event
+header がない既存 webhook は従来通り push payload として扱います。
+
 ## キューと重複排除
 
 delivery ID はメモリ内で deduplicate されます。重複配送は `202` と
