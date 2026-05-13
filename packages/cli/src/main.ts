@@ -54,8 +54,7 @@ PUSH OPTIONS:
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
   --mode <apply|plan|destroy>  deploy mode (default apply)
-  --artifact-contract <v0|v1|auto>
-                               artifact URI resolver (default v1)
+  --artifact-contract <v1>     artifact URI resolver (default v1)
   --dry-run                    run workflows but skip POST; print resolved manifest
 
 INSTALL OPTIONS:
@@ -134,8 +133,7 @@ SERVE OPTIONS:
                                dispatch verified webhooks through push or install
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
-  --artifact-contract <v0|v1|auto>
-                               artifact URI resolver for dispatched push
+  --artifact-contract <v1>     artifact URI resolver for dispatched push
   --rate-limit <n>             max requests per rate window (default 60)
   --rate-limit-window-ms <n>   rate window milliseconds (default 60000)
   --accounts-url <url>         Takosumi Accounts URL for webhook install mode
@@ -153,8 +151,7 @@ WATCH OPTIONS:
   --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
   --workflows-dir <path>       workflows dir (default .takosumi/workflows)
   --intent-path-prefix <path>  deploy intent JSON directory (default deployments)
-  --artifact-contract <v0|v1|auto>
-                               artifact URI resolver (default v1)
+  --artifact-contract <v1>     artifact URI resolver (default v1)
   --poll-interval-ms <n>       git HEAD poll interval (default 5000)
   --run-current                deploy current HEAD before watching changes
   --once                       exit after the first dispatched push

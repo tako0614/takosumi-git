@@ -971,6 +971,27 @@ Deno.test("parseServeArgs reads endpoint token and secret from env", () => {
   assertEquals(parsed.deployToken, "deploy-token");
 });
 
+Deno.test("parseServeArgs rejects removed artifact contracts", () => {
+  const env = {
+    get(key: string) {
+      const values: Record<string, string> = {
+        TAKOSUMI_ENDPOINT: "https://kernel.example",
+        TAKOSUMI_TOKEN: "token",
+        TAKOSUMI_GIT_WEBHOOK_SECRET: "secret",
+      };
+      return values[key];
+    },
+  };
+
+  for (const removed of ["v0", "auto"]) {
+    assertThrows(
+      () => parseServeArgs(["--artifact-contract", removed], env),
+      Error,
+      "--artifact-contract must be v1",
+    );
+  }
+});
+
 Deno.test("parseServeArgs rejects removed service resolver flags", () => {
   assertThrows(
     () =>

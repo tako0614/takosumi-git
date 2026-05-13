@@ -828,10 +828,23 @@ Deno.test("push defaults artifact contract to v1 marker detection", () => {
   });
   assertEquals(parsed.artifactContract, "v1");
 
-  const auto = parsePushArgs(["--dry-run", "--artifact-contract", "auto"], {
+  const explicit = parsePushArgs(["--dry-run", "--artifact-contract", "v1"], {
     get: () => undefined,
   });
-  assertEquals(auto.artifactContract, "auto");
+  assertEquals(explicit.artifactContract, "v1");
+});
+
+Deno.test("push rejects removed artifact contracts", () => {
+  for (const removed of ["v0", "auto"]) {
+    assertThrows(
+      () =>
+        parsePushArgs(["--dry-run", "--artifact-contract", removed], {
+          get: () => undefined,
+        }),
+      Error,
+      "--artifact-contract must be v1",
+    );
+  }
 });
 
 Deno.test("push rejects removed service resolver flags", () => {
@@ -955,7 +968,7 @@ Deno.test("push rejects non-digest-pinned spec.image artifacts", async () => {
   }
 });
 
-Deno.test("push supports explicit v0 and auto fallback artifact contracts", async () => {
+Deno.test("push rejects explicit v0 and auto fallback artifact contracts", async () => {
   const project = await makeProject({
     manifest: {
       apiVersion: "1.0",
@@ -990,20 +1003,21 @@ Deno.test("push supports explicit v0 and auto fallback artifact contracts", asyn
 
   try {
     for (const artifactContract of ["v0", "auto"] as const) {
-      const result = await push({
-        endpoint: "http://nope",
-        token: "x",
-        manifestPath: join(project.root, ".takosumi", "manifest.yml"),
-        workflowsDir: join(project.root, ".takosumi", "workflows"),
-        mode: "apply",
-        dryRun: true,
-        artifactContract,
-        executorFactory: () => fakeLegacyOk,
-        stdout: () => {},
-      });
-      assertEquals(
-        result.resolved[0].artifact.uri,
-        "ghcr.io/example/app@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      await assertRejects(
+        () =>
+          push({
+            endpoint: "http://nope",
+            token: "x",
+            manifestPath: join(project.root, ".takosumi", "manifest.yml"),
+            workflowsDir: join(project.root, ".takosumi", "workflows"),
+            mode: "apply",
+            dryRun: true,
+            artifactContract: artifactContract as "v1",
+            executorFactory: () => fakeLegacyOk,
+            stdout: () => {},
+          }),
+        Error,
+        "produced no TAKOSUMI_ARTIFACT=<uri> marker",
       );
     }
   } finally {

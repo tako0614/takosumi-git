@@ -123,12 +123,10 @@ resolveWorkflowFilePath
 validateResolvedArtifactTarget
 spec.image artifacts must be digest-pinned
 artifactContractResolver
-lastLineArtifactResolver
 parseArtifactContract
 setResourceArtifactTarget
 stripWorkflowRefs
 workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI
-workflow job '${jobName}' produced no stdout; cannot resolve artifact URI
 ```
 
 Workflow files must stay inside `.takosumi/workflows`.

@@ -90,7 +90,7 @@ export interface PushResult {
   readonly response?: { status: number; body: unknown };
 }
 
-export type ArtifactContract = "v0" | "v1" | "auto";
+export type ArtifactContract = "v1";
 export type GitRunner = (
   args: readonly string[],
   cwd: string,
@@ -111,11 +111,6 @@ function stdoutLines(text: string): string[] {
   return stdoutOnly.split("\n").map((l) => l.trim()).filter((l) =>
     l.length > 0
   );
-}
-
-function lastNonEmptyLine(text: string): string | null {
-  const lines = stdoutLines(text);
-  return lines.length > 0 ? lines[lines.length - 1] : null;
 }
 
 type MarkerResult =
@@ -146,38 +141,14 @@ function findArtifactMarker(logs: readonly string[]): MarkerResult {
   return { found: false };
 }
 
-function findLegacyStdoutArtifact(logs: readonly string[]): string | null {
-  for (let i = logs.length - 1; i >= 0; i--) {
-    const line = lastNonEmptyLine(logs[i]);
-    if (line) return line;
-  }
-  return null;
-}
-
 function resolveArtifactUri(
   logs: readonly string[],
   jobName: string,
-  contract: ArtifactContract,
 ): string {
-  if (contract === "v1" || contract === "auto") {
-    const marker = findArtifactMarker(logs);
-    if (marker.found) return marker.uri;
-    if (contract === "v1") {
-      throw new Error(
-        `workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI`,
-      );
-    }
-  }
-
-  const legacy = findLegacyStdoutArtifact(logs);
-  if (legacy) return legacy;
-  if (contract === "auto") {
-    throw new Error(
-      `workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker or stdout artifact; cannot resolve artifact URI`,
-    );
-  }
+  const marker = findArtifactMarker(logs);
+  if (marker.found) return marker.uri;
   throw new Error(
-    `workflow job '${jobName}' produced no stdout; cannot resolve artifact URI`,
+    `workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI`,
   );
 }
 
@@ -187,30 +158,19 @@ function resolveArtifactUri(
 export function artifactContractResolver(
   capturedLogs: () => readonly string[],
   ref: ComputeWorkflowRef,
-  contract: ArtifactContract,
+  _contract: ArtifactContract,
 ): ArtifactResolver {
   return (job: WorkflowJobSpec, _event: WorkflowEvent) => {
     const logs = capturedLogs();
     try {
       return Promise.resolve({
         name: job.artifact?.name ?? ref.artifact,
-        uri: resolveArtifactUri(logs, job.name, contract),
+        uri: resolveArtifactUri(logs, job.name),
       });
     } catch (error) {
       return Promise.reject(error);
     }
   };
-}
-
-/**
- * Internal v0 resolver retained for parser regression tests. Current operator
- * workflows use `artifactContractResolver(..., "v1")`.
- */
-export function lastLineArtifactResolver(
-  capturedLogs: () => readonly string[],
-  ref: ComputeWorkflowRef,
-): ArtifactResolver {
-  return artifactContractResolver(capturedLogs, ref, "v0");
 }
 
 interface ResourceEntry {
@@ -417,9 +377,9 @@ export async function push(options: PushOptions): Promise<PushResult> {
       );
     }
 
-    // Capture per-step stdout so the artifact resolver can read the last
-    // step's last line. We wrap the executor to push outcomes into this
-    // buffer in execution order.
+    // Capture per-step stdout so the artifact resolver can scan for the
+    // TAKOSUMI_ARTIFACT marker. We wrap the executor to push outcomes into
+    // this buffer in execution order.
     const stepStdouts: string[] = [];
     const stepLogProvenance: DeploymentResourceArtifactProvenance[
       "stepLogs"
@@ -686,9 +646,9 @@ export interface ParsedPushArgs {
 }
 
 export function parseArtifactContract(raw: unknown): ArtifactContract {
-  if (raw === "v0" || raw === "v1" || raw === "auto") return raw;
+  if (raw === "v1") return raw;
   throw new Error(
-    `--artifact-contract must be one of v0|v1|auto (got '${String(raw)}')`,
+    `--artifact-contract must be v1 (got '${String(raw)}')`,
   );
 }
 

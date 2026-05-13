@@ -1,4 +1,4 @@
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 
 Deno.test("top-level help documents current install UX", async () => {
   const output = await runCli("--help");
@@ -15,6 +15,8 @@ Deno.test("top-level help documents current install UX", async () => {
     output,
     "--json                       print preview/apply JSON",
   );
+  assertStringIncludes(output, "--artifact-contract <v1>");
+  assert(!output.includes("--artifact-contract <v0|v1|auto>"));
 });
 
 Deno.test("top-level help documents import and webhook install flags", async () => {

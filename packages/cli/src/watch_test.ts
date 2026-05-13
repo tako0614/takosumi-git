@@ -454,7 +454,7 @@ Deno.test("parseWatchArgs reads kernel config from env", () => {
     "--poll-interval-ms",
     "250",
     "--artifact-contract",
-    "auto",
+    "v1",
   ], {
     get(key: string) {
       const values: Record<string, string> = {
@@ -472,8 +472,27 @@ Deno.test("parseWatchArgs reads kernel config from env", () => {
   assertEquals(parsed.once, true);
   assertEquals(parsed.runCurrent, true);
   assertEquals(parsed.pollIntervalMs, 250);
-  assertEquals(parsed.artifactContract, "auto");
+  assertEquals(parsed.artifactContract, "v1");
   assertEquals(parsed.intentPathPrefix, "apps/takos");
+});
+
+Deno.test("parseWatchArgs rejects removed artifact contracts", () => {
+  const env = {
+    get(key: string) {
+      const values: Record<string, string> = {
+        TAKOSUMI_ENDPOINT: "http://kernel.example",
+        TAKOSUMI_TOKEN: "deploy-token",
+      };
+      return values[key];
+    },
+  };
+
+  for (const removed of ["v0", "auto"]) {
+    assertThrowsMessage(
+      () => parseWatchArgs(["--artifact-contract", removed], env),
+      "--artifact-contract must be v1",
+    );
+  }
 });
 
 Deno.test("parseWatchArgs requires deploy config unless dry-run", () => {
