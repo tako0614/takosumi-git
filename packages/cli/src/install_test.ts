@@ -211,7 +211,7 @@ function opaqueLaunchTokenConfig(
 }
 
 Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
-  const app = parseInstallableAppYaml(VALID_APP_YML);
+  const app = parseInstallableAppYaml(PINNED_APP_YML);
 
   assertEquals(app.metadata.id, "example.hello");
   assertEquals(app.source.git, "https://github.com/example/hello");
@@ -223,7 +223,17 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
     "logs.read.own",
   ]);
 
-  const preview = buildInstallPreview(app);
+  const preview = buildInstallPreview(app, {
+    appManifestDigest:
+      "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    publisherVerification: {
+      publisher: "example",
+      homepage: "https://example.com",
+      signingKeyFingerprint: "SHA256:abcd",
+      verifiedAt: "2026-05-14T00:00:00Z",
+      method: "dns-txt",
+    },
+  });
   assertEquals(preview.kind, "takosumi-git.install-preview@v1");
   assert(preview.previewId.startsWith("preview_"));
   assert(new Date(preview.expiresAt).getTime() > Date.now());
@@ -238,6 +248,41 @@ Deno.test("parseInstallableAppYaml accepts InstallableApp v1", () => {
   assert(preview.permissionDigest.startsWith("sha256:"));
   assertEquals(preview.risk.level, "medium");
   assertEquals(preview.approvalRequired, true);
+});
+
+Deno.test("buildInstallPreview does not verify publisher from fingerprint alone", () => {
+  const app = parseInstallableAppYaml(PINNED_APP_YML);
+  const preview = buildInstallPreview(app, {
+    appManifestDigest:
+      "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  });
+
+  assertEquals(preview.publisher.signingKeyFingerprint, "SHA256:abcd");
+  assertEquals(preview.publisher.verified, false);
+  assertEquals(preview.source.pinned, true);
+  assertEquals(preview.risk.level, "high");
+  assertEquals(
+    preview.risk.reasons.includes("publisher is not verified"),
+    true,
+  );
+});
+
+Deno.test("buildInstallPreview rejects mismatched publisher verification records", () => {
+  const app = parseInstallableAppYaml(PINNED_APP_YML);
+  const preview = buildInstallPreview(app, {
+    appManifestDigest:
+      "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    publisherVerification: {
+      publisher: "other",
+      homepage: "https://example.com",
+      signingKeyFingerprint: "SHA256:abcd",
+      verifiedAt: "2026-05-14T00:00:00Z",
+      method: "dns-txt",
+    },
+  });
+
+  assertEquals(preview.publisher.verified, false);
+  assertEquals(preview.risk.level, "high");
 });
 
 Deno.test("buildInstallPreview records approval and risk metadata", () => {

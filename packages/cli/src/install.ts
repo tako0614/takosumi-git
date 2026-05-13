@@ -202,6 +202,14 @@ export interface InstallPreview {
   };
 }
 
+export interface PublisherVerificationRecord {
+  readonly publisher: string;
+  readonly homepage: string;
+  readonly signingKeyFingerprint: string;
+  readonly verifiedAt: string;
+  readonly method: "dns-txt";
+}
+
 export interface InstallOidcClientCreateRequest {
   readonly binding: string;
   readonly namespacePath: string;
@@ -1122,6 +1130,37 @@ export function isPinnedSource(app: InstallableApp): boolean {
     releaseTagPattern.test(app.source.ref);
 }
 
+function hasSourceCommitPin(app: InstallableApp): boolean {
+  return !!app.source.commit || fullCommitPattern.test(app.source.ref);
+}
+
+function sameHomepageOrigin(left: string, right: string): boolean {
+  try {
+    return new URL(left).origin === new URL(right).origin;
+  } catch {
+    return false;
+  }
+}
+
+function hasPublisherVerificationMinimum(
+  app: InstallableApp,
+  options: {
+    readonly appManifestDigest?: string;
+    readonly publisherVerification?: PublisherVerificationRecord;
+  },
+): boolean {
+  const record = options.publisherVerification;
+  return !!record &&
+    !!app.metadata.signingKeyFingerprint &&
+    record.publisher === app.metadata.publisher &&
+    sameHomepageOrigin(record.homepage, app.metadata.homepage) &&
+    record.signingKeyFingerprint === app.metadata.signingKeyFingerprint &&
+    record.method === "dns-txt" &&
+    Number.isFinite(Date.parse(record.verifiedAt)) &&
+    hasSourceCommitPin(app) &&
+    !!options.appManifestDigest;
+}
+
 export function buildInstallPreview(
   app: InstallableApp,
   options: {
@@ -1129,6 +1168,7 @@ export function buildInstallPreview(
     readonly compiledManifestDigest?: string;
     readonly compatibilityWarnings?: readonly string[];
     readonly now?: Date;
+    readonly publisherVerification?: PublisherVerificationRecord;
   } = {},
 ): InstallPreview {
   const bindings = Object.entries(app.bindings).map(([name, binding]) => ({
@@ -1152,8 +1192,9 @@ export function buildInstallPreview(
     bindingKinds: bindings.map((binding) => binding.type).sort(),
     grants: [...app.permissions.requested].sort(),
   });
+  const publisherVerified = hasPublisherVerificationMinimum(app, options);
   const risk = installPreviewRisk({
-    verifiedPublisher: !!app.metadata.signingKeyFingerprint,
+    verifiedPublisher: publisherVerified,
     pinnedSource: isPinnedSource(app),
     requiredMeteredBindingCount: bindings.filter((binding) =>
       binding.required &&
@@ -1186,7 +1227,7 @@ export function buildInstallPreview(
     },
     publisher: {
       id: app.metadata.publisher,
-      verified: !!app.metadata.signingKeyFingerprint,
+      verified: publisherVerified,
       ...(app.metadata.signingKeyFingerprint
         ? { signingKeyFingerprint: app.metadata.signingKeyFingerprint }
         : {}),

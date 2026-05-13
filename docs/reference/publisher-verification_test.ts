@@ -12,6 +12,8 @@ Deno.test("publisher verification minimum spec matches preview vocabulary", asyn
       "metadata.publisher",
       "metadata.homepage",
       "metadata.signingKeyFingerprint",
+      "resolved source commit",
+      "app manifest digest",
       "_takosumi-publisher.<homepage-host>",
       "takosumi-publisher=v1 publisher=<publisher> key=<signingKeyFingerprint>",
       "publisher.verified",
@@ -37,6 +39,7 @@ Deno.test("publisher verification minimum spec matches preview vocabulary", asyn
     const snippet of [
       "publisher: {",
       "verified:",
+      "PublisherVerificationRecord",
       "signingKeyFingerprint",
       "publisher is not verified",
     ]
