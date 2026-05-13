@@ -20,7 +20,6 @@ import {
   type ComputeWorkflowRef,
   parseWorkflowFile,
   type WorkflowEvent,
-  type WorkflowFile,
   type WorkflowJobSpec,
 } from "@takos/takosumi-git-workflow-contract";
 import {
@@ -307,13 +306,6 @@ const postgresExtensions = new Set([
   "pg_trgm",
 ]);
 const objectStorePlans = new Set(["standard", "infrequent-access", "archive"]);
-const tlsModes = new Set(["auto", "managed", "byo"]);
-const oidcAuthMethods = new Set([
-  "client_secret_basic",
-  "client_secret_post",
-  "private_key_jwt",
-]);
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }

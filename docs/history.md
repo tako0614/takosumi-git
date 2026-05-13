@@ -1,33 +1,36 @@
 # History
 
-> Stability: v1 Audience: workflow author, operator Owner: takosumi-git
+> このページでわかること: `takosumi-git history`
+> でマニフェストの変更履歴を表示する方法。
 
-`takosumi-git history` reads git history for `.takosumi/manifest.yml`. It does
-not contact the Takosumi kernel and it does not inspect deployment records.
+`takosumi-git history` は `.takosumi/manifest.yml` の git history を読みます。
+Takosumi kernel には接続せず、deployment record も参照しません。
 
-## Manifest History
+## Manifest history
 
 ```bash
 takosumi-git history
 ```
 
-The default output is one line per manifest commit:
+既定の出力は manifest コミット 1 件につき 1 行です。
 
 ```text
 <short-sha>  <committed-at>  <subject>
 ```
 
-Use `--manifest <path>` when your takosumi-git manifest is not the default
-`.takosumi/manifest.yml`, and `--limit <n>` to bound the number of commits read.
+manifest が既定の `.takosumi/manifest.yml` 以外にあるときは
+`--manifest <path>`、 読み取るコミット数を制限したいときは `--limit <n>`
+を指定します。
 
-## Resource Diff
+## Resource diff
 
 ```bash
 takosumi-git history --resource web
 ```
 
-Resource mode parses each manifest revision, finds `resources[].name == "web"`,
-normalizes that resource to stable YAML, and prints a semantic line diff between
-adjacent manifest revisions. This avoids raw YAML noise from unrelated resource
-ordering or formatting changes while still showing the actual manifest shape
-that changed.
+resource モードは各リビジョンの manifest を parse して
+`resources[].name ==
+"web"` を取り出し、安定 YAML
+に正規化したうえで隣接リビジョン間のセマンティ ック diff を出力します。無関係な
+resource の並び順やフォーマット差分による ノイズを避けつつ、実際に変わった
+manifest shape だけを表示します。

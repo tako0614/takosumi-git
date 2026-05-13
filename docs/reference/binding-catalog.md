@@ -1,60 +1,47 @@
 # Binding Catalog
 
-> **Canonical authority**: 本ページの **§8 Placeholder 解決順序** が
-> installer-only placeholder contract の正本です。
-> [reference/manifest-spec § 13](../../../takosumi/docs/reference/manifest-spec.md#compile-time-placeholders)
-> は本 §8 への cross-ref であり、order
-> を変更する場合は本ページを先に更新します。
+> このページでわかること: AppBinding の型一覧と placeholder 解決順序の仕様。
 
-`.takosumi/app.yml` の `bindings:` 節で宣言できる **binding type の正本
-catalog** です。Installable App Model では binding は app が要求する **resource
-抽象型** を 6 種に固定し、provision / inject / rotate / revoke / destroy の
-lifecycle を operator distribution / Takosumi Accounts / takosumi-git の側が
-担います。Operator / account plane dependency は AppBinding ではなく namespace
-export と account API / BillingPort で表現します。
+::: tip 関連ページ installer-only placeholder の解決順は本ページの §8
+が正本です。
+[manifest-spec § 13](../../../takosumi/docs/reference/manifest-spec.md#compile-time-placeholders)
+からも本 §8 を参照します。 :::
 
-この catalog は **Installable App v1 の managed binding catalog** です。Takosumi
-kernel の universal resource model ではなく、compiled Shape manifest
-に到達する前の installer / Accounts materialization contract です。新しい
-binding kind を増やす 場合は、この catalog と preview / materializer /
-acceptance gate を lockstep で 更新します。
+`.takosumi/app.yml` の `bindings:` 節で宣言できる binding type の catalog です。
+Installable App Model では binding は app が要求する resource 抽象型を 6 種に
+固定し、provision / inject / rotate / revoke / destroy の lifecycle を operator
+distribution / Takosumi Accounts / takosumi-git の側が担います。 operator /
+account plane への依存は AppBinding ではなく namespace export と account API /
+BillingPort で表現します。
 
-Binding materialization は install lifecycle の一部です。kernel deploy
+binding catalog は compiled Shape manifest に到達する前の installer / Accounts
+materialization contract です。Takosumi kernel の universal resource model
+ではありません。binding kind を増やすときは、本 catalog と preview /
+materializer / acceptance gate を lockstep で更新します。
+
+binding materialization は install lifecycle の一部です。kernel deploy
 (`POST /v1/deployments`) は compile 済み Shape manifest だけを受け取り、
 AppBinding / AppGrant / namespace export grant の ownership は持ちません。
 
-このページで依存してよい範囲:
+本ページは次の範囲を定義します:
 
-- `.takosumi/app.yml` の `bindings.*.type` 値として使える 6 種の identifier
-- 各 binding materializer が authoring `.takosumi/manifest.yml` の compile 前に
-  提供できる `${bindings.<name>.*}` / `${secrets.<name>.*}` reserved placeholder
-  vocabulary
-- 各 binding が compiled manifest に実値として提供する env vars
-- placeholder 解決順序 (canonical, 解決優先度順): `${params.*}` →
-  `${installation.*}` → `${artifacts.*}` → `${bindings.*}` → `${secrets.*}` →
-  `${env.*}` → kernel-resolved references (`${ref:...}` / `${secret-ref:...}`)
+- `.takosumi/app.yml` の `bindings.*.type` で使える 6 種の identifier
+- 各 binding が `.takosumi/manifest.yml` の compile 前に提供する
+  `${bindings.<name>.*}` / `${secrets.<name>.*}` placeholder
+- compiled manifest に実値として注入される env vars
+- placeholder 解決順序: `${params.*}` → `${installation.*}` → `${artifacts.*}` →
+  `${bindings.*}` → `${secrets.*}` → `${env.*}` → kernel-resolved references
+  (`${ref:...}` / `${secret-ref:...}`)
 
-Current `takosumi-git` compiler enforces the boundary conservatively: if
-`${params.*}`, `${installation.*}`, `${artifacts.*}`, `${bindings.*}`,
-`${secrets.*}`, legacy `${refs.*}`, or `${imports.*}` remains unresolved after
-compile, the command fails before Accounts / kernel requests.
+`takosumi-git` compiler は `${params.*}` / `${installation.*}` /
+`${artifacts.*}` / `${bindings.*}` / `${secrets.*}` が compile 後に残っていれば
+Accounts / kernel request 前にエラーにします。
 
-The output placeholder tables and "Default env injection" snippets below are the
-account-plane materializer contract. They are not a promise that the standalone
-compiler will invent values when no materializer supplied them.
-
-このページで依存してはいけない範囲:
-
-- provider plugin (例: `@takos/managed-postgres`) の **内部実装**: backend の
-  種類や物理 DB cluster 構成は private。本 catalog は **interface のみ**を
-  contract 化する。
-- Takosumi kernel 内部の resource shape (`database-postgres@v1` 等): kernel に
-  渡る最終 manifest は unresolved binding placeholder を含まず、kernel は
-  binding を **知らない**。
-- Takosumi Accounts の OIDC issuer 内部実装: `identity.oidc@v1` は consumer
-  視点の interface のみを定義する (issuer 側 contract は
-  [Takosumi Accounts](../../../takosumi-cloud/docs/architecture/takosumi-accounts.md)
-  参照)。
+provider plugin (例: `@takos/managed-postgres`) の内部実装、kernel が扱う
+resource shape、Takosumi Accounts の issuer 実装はこの catalog の範囲外です。
+issuer 側の詳細は
+[Takosumi Accounts](../../../takosumi-cloud/docs/architecture/takosumi-accounts.md)
+を参照してください。
 
 ## 0. Catalog 一覧
 
@@ -469,9 +456,9 @@ secret schema は **空** (公開鍵 / 署名鍵は使わない、 opaque token 
 から redirect URI を組み立てて issue request に渡し、 app 側も同じ redirect URI
 を consume request に送ります。
 
-現行 Takosumi Accounts は `POST /v1/installations` 時にこの binding の発行設定を
-ledger に記録し、 install 完了 タイミングで opaque token を発行し redirect URL
-に carry する。
+Takosumi Accounts は `POST /v1/installations` 時にこの binding の発行設定を
+ledger に記録し、install 完了タイミングで opaque token を発行して redirect URL
+に carry します。
 
 ### 6.3 Output placeholders
 
@@ -515,23 +502,12 @@ bindings:
     maxLifetimeSeconds: 300
 ```
 
-### 6.6 Retired JWS model
-
-v0 の binding は JWS verify 用に `INSTALL_LAUNCH_PUBLIC_KEY` /
-`INSTALL_LAUNCH_AUDIENCE` / `INSTALL_LAUNCH_ISSUER` を 注入する model だった。
-v1 で opaque token + TLS redeem に整理された。
-
-current contract は clean cut で、`INSTALL_LAUNCH_PUBLIC_KEY` 系 env / local JWS
-verify / query `token` fallback を 受け付けない。 app は `launch_token=<opaque>`
-を受け取り、`ACCOUNTS_BASE_URL` の `/consume` endpoint へ redeem する。
-
 ## 7. Namespace exports are not AppBinding kinds
 
-Operator / account plane dependency は current AppBinding catalog
-には含めません。 OIDC は `operator.identity.oidc`、billing は
-`operator.billing.default` のような namespace export を Accounts / installer
-layer が grant し、compiled manifest には unresolved `${bindings.*}` /
-`${imports.*}` を残しません。
+Operator / account plane dependency は AppBinding catalog には含めません。 OIDC
+は `operator.identity.oidc`、billing は `operator.billing.default` のような
+namespace export を Accounts / installer layer が grant し、compiled manifest
+には unresolved `${bindings.*}` / `${imports.*}` を残しません。
 
 詳細は
 [Namespace Export Model](../../../takosumi/docs/reference/architecture/namespace-export-model.md)
@@ -554,14 +530,13 @@ placeholder の優先順位:
 7. kernel-resolved references — `${ref:...}` / `${secret-ref:...}` は kernel が
    apply 時に解決
 
-kernel-resolved references は compiled manifest にそのまま残るが、それ以外 (1〜6
-と legacy `${refs.*}`) は **kernel deploy payload に残らない** invariant。
-current `takosumi-git install apply` は operator account plane が所有する
-AppInstallation の materialization result で supported `${bindings.*}` /
-`${secrets.*}` / `${installation.*}` を解決し、 deploy request build 後も
-installer-only placeholder が残る場合は kernel request 前に失敗する。`${env.*}`
-は kernel resolver ではないため、使う場合は operator-owned manifest generation
-で concrete value にする。
+kernel-resolved references は compiled manifest にそのまま残ります。それ以外 の
+placeholder (1〜6) は **kernel deploy payload に残らない** ことが
+不変条件です。`takosumi-git install apply` は AppInstallation の materialization
+result で `${bindings.*}` / `${secrets.*}` / `${installation.*}` を解決し、
+解決後も installer-only placeholder が残る場合は kernel request 前に失敗します。
+`${env.*}` は kernel resolver ではないため、使うときは operator-owned manifest
+generation で concrete value にしてください。
 
 ### 8.1 名前衝突の禁止
 

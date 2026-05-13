@@ -145,7 +145,7 @@ takosumi-git history                  # git history = manifest version 履歴を
 --manifest <path>            manifest YAML (default .takosumi/manifest.yml)
 --workflows-dir <path>       workflows dir (default .takosumi/workflows)
 --mode <apply|plan|destroy>  deploy mode (bundled apply)
---artifact-contract <v0|v1|auto> artifact URI resolver (default v1)
+--artifact-contract <v1>        artifact URI resolver (current operator contract)
 --dry-run                    workflow を実行するが POST はせず resolved manifest を出力
 ```
 
@@ -153,8 +153,7 @@ takosumi-git history                  # git history = manifest version 履歴を
 の私的拡張で、 kernel に submit する前に必ず strip される (kernel の
 `ManifestResource` は closed shape)。解決後の URI は同 entry の `spec.image`
 に書き込まれる。artifact URI は v1 contract として `TAKOSUMI_ARTIFACT=<uri>`
-stdout marker を採用する。v0 の最後の非空 stdout 行 contract は
-`--artifact-contract v0` / `auto` で legacy fallback として残す。詳細は
+stdout marker を採用する。current operator docs は v1 marker のみを扱う。詳細は
 [`docs/artifact-contract.md`](./docs/artifact-contract.md) を参照。
 
 ## Lint / Format / Test 共通設定

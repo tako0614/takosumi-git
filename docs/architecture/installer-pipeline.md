@@ -1,5 +1,8 @@
 # Installer Pipeline
 
+> このページでわかること: takosumi-git の installer pipeline (Git clone →
+> workflow → deploy) の全体像。
+
 `takosumi-git` は Git URL installer / workflow runner / manifest compiler
 です。Git URL を受け取り、`.takosumi/app.yml` を解釈し、workflow を sandbox
 で走らせて artifact を build し、Takosumi Accounts install API に AppBinding /
@@ -13,19 +16,10 @@ orchestration step / CLI / sandbox / pin / publisher verification
 を集約する。AppInstallation ledger と status transition の正本は Takosumi
 Accounts です。
 
-::: info このページで依存してよい範囲 / してはいけない範囲
-
-- 依存してよい: 13 step の順序、CLI / API の入口名、commit pin と manifest
-  digest が AppInstallation 行に保存されること、build workflow に runtime secret
-  は渡らないこと、AppGrant が事後 revoke 可能であること。
-- 依存してはいけない: workflow の job scheduler 内部、artifact storage の物理
-  path、preview を計算する内部 cache の TTL。これらは takosumi-git product の
-  implementation note で、本ページの正本範囲外。
-- 依存してはいけない: takosumi kernel が直接 Git URL を読む / `app.yml`
-  を解釈する想定。**kernel は compile 後の manifest しか受けない** のが
-  Installable App Model の不変条件。
-
-:::
+::: tip 重要な前提 takosumi kernel は compile 後の manifest
+しか受け取りません。Git URL の解釈や `app.yml` の処理はすべて takosumi-git
+側で完結し、kernel には resolved な Shape manifest だけが届きます。これは
+Installable App Model の不変条件です。 :::
 
 ::: info Namespace exports takosumi-cloud / Takosumi Accounts 等の上位 surface
 は `operator.identity.oidc` / `operator.billing.default` /
@@ -202,8 +196,8 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 - `workflowRef.file` は `.takosumi/workflows` 内の relative path に限定し、
   `../` escape / absolute path / symlink escape は workflow 実行前に拒否する。
 - untrusted Git repo には operator 側の container / VM runner で network egress
-  allowlist を適用する。current default local executor は build process の env
-  を clear するが、OS-level network namespace は作らない。
+  allowlist を適用する。既定のローカル executor は build process の env を clear
+  するが、OS-level network namespace は作らない。
 - 出力は artifact (image digest / static asset URI) **だけ** が installer
   に返る。stdout / stderr は build log に残るが secret 検知 scrubber を通る。
 - workflow が要求する extra secret は AppBinding 経由でなく `secrets:`
@@ -213,11 +207,11 @@ runner は **build phase / deploy phase を物理的に分離** する (本書 /
 
 - compiled manifest への binding 値反映は **installer / account plane 内部**で
   行い、workflow からは触れない。
-- current `takosumi-git` は Accounts materialization 後に `${bindings.*}` /
+- `takosumi-git` は Accounts materialization 後に `${bindings.*}` /
   `${secrets.*}` / `${installation.*}` を解決する。未解決の `${params.*}` /
   `${installation.*}` / `${artifacts.*}` / `${bindings.*}` / `${secrets.*}` や
-  installer-only placeholders は kernel に渡さず、 deploy request build
-  時点で失敗させる。
+  installer-only placeholders は kernel に渡さず、deploy request build 時点で
+  失敗させる。
 - kernel は manifest 内の installer-only placeholder を受け付けない。残り得る
   placeholder は `${ref:...}` / `${secret-ref:...}` の kernel-resolved
   references だけ。

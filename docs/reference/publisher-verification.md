@@ -1,73 +1,82 @@
 # Publisher Verification Minimum Spec
 
-This document defines the minimum 1.x publisher verification contract for
-InstallableApp metadata. Full registry, key-transparency, and signing
-enforcement remain 2.x work; 1.x only fixes the vocabulary and the preview
-surface so operators and apps do not invent incompatible meanings.
+> このページでわかること: InstallableApp の publisher 検証の最小仕様。
 
-## Scope
+このページは InstallableApp metadata に対する publisher 検証の最小契約を
+定義します。レジストリや key-transparency、署名強制の本格運用は別ページの
+スコープです。ここでは vocabulary と preview surface だけを固定し、operator や
+app が互いに非互換な意味を発明しないようにします。
 
-Publisher verification applies to `.takosumi/app.yml` documents with:
+## 適用範囲
+
+publisher 検証は次のフィールドを持つ `.takosumi/app.yml` に適用します。
 
 - `metadata.publisher`
 - `metadata.homepage`
-- optional `metadata.signingKeyFingerprint`
-- the immutable `source.ref` / `source.commit` chain
+- 任意の `metadata.signingKeyFingerprint`
+- 不変な `source.ref` / `source.commit` chain
 
-The installer must never treat a repository as verified only because the Git URL
-belongs to a popular host or because the app name matches a known product.
+リポジトリの Git URL が著名なホストに属しているとか、app 名が既知の製品名
+と一致しているという理由だけで verified と扱うことはありません。
 
-## Minimum Verified Publisher Record
+## 最小の verified publisher record
 
-A verified publisher record contains:
+verified publisher record は次のフィールドを持ちます。
 
-| field                   | requirement                                                                         |
-| ----------------------- | ----------------------------------------------------------------------------------- |
-| `publisher`             | Matches `metadata.publisher` and the slug pattern in the App YAML spec              |
-| `homepage`              | Matches `metadata.homepage` origin and uses `https://`                              |
-| `signingKeyFingerprint` | Matches `metadata.signingKeyFingerprint` with `SHA256:<base64url-or-base64>` syntax |
-| `verifiedAt`            | RFC 3339 timestamp from the verifying Takosumi Accounts instance                    |
-| `method`                | `dns-txt` for the 1.x minimum method                                                |
+| field                   | 要件                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `publisher`             | `metadata.publisher` と一致し、App YAML spec の slug パターンに合致            |
+| `homepage`              | `metadata.homepage` の origin と一致し、`https://` を使う                      |
+| `signingKeyFingerprint` | `metadata.signingKeyFingerprint` と一致し、`SHA256:<base64url-or-base64>` 形式 |
+| `verifiedAt`            | 検証を行った Takosumi Accounts インスタンスが付与する RFC 3339 タイムスタンプ  |
+| `method`                | `dns-txt`                                                                      |
 
-The 1.x minimum DNS record name is:
+最小の DNS レコード名:
 
 ```txt
 _takosumi-publisher.<homepage-host>
 ```
 
-The minimum TXT value is:
+最小の TXT 値:
 
 ```txt
 takosumi-publisher=v1 publisher=<publisher> key=<signingKeyFingerprint>
 ```
 
-Operators may add stricter local policy, but the preview vocabulary must still
-map to the fields above.
+operator は追加のローカルポリシーを設けて構いませんが、preview vocabulary は
+このフィールド群にマップできる必要があります。
 
-## Preview Semantics
+## Preview semantics
 
-`takosumi-git install preview` exposes:
+`takosumi-git install preview` は次を公開します。
 
 - `publisher.id`
 - `publisher.verified`
-- `publisher.signingKeyFingerprint` when present
-- `risk.reasons[]` including `publisher is not verified` when verification is
-  absent or failed
+- `publisher.signingKeyFingerprint` (存在する場合)
+- `risk.reasons[]` — 検証が無い・失敗した場合は `publisher is not verified`
+  を含む
 
-For 1.x, `publisher.verified: true` is allowed only when an operator-provided
-verification record matches the app metadata. Until a registry-backed verifier
-is wired in, the CLI fallback is intentionally conservative: a missing
-`metadata.signingKeyFingerprint` is unverified, and a present fingerprint is
-only a preview signal, not a portable proof.
+`publisher.verified: true` は、operator が提供する verification record が app
+metadata と一致したときにだけセットされます。registry 連携の verifier が
+未配線な環境では CLI
+のフォールバックは保守的で、`metadata.signingKeyFingerprint` が無いものは
+unverified、ある場合でも preview signal にとどまり可搬な証明 にはなりません。
 
-## Non-Goals
+## Non-goals
 
-The following are explicitly outside 1.x minimum scope:
+次の項目は本ページの最小スコープには含めません。
 
 - key transparency log
-- Sigstore / Fulcio integration
-- automatic publisher account recovery
-- cross-instance federation of publisher records
-- treating GitHub organization ownership as publisher verification
+- Sigstore / Fulcio 連携
+- publisher アカウントの自動復旧
+- cross-instance federation
+- GitHub organization ownership を publisher 検証として扱うこと
 
-Those may be added in 2.x without changing the 1.x preview fields.
+Preview vocabulary anchor:
+
+```ts
+publisher: {
+  id: "example";
+  verified: false;
+}
+```

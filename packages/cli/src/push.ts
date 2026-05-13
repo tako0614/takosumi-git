@@ -11,9 +11,8 @@
  *      read the referenced workflow file under `.takosumi/workflows/`.
  *   3. Run the named job's steps as subprocesses (`bash -lc <run>`),
  *      capturing each step's stdout.
- *   4. Resolve the artifact URI. The default v1 contract scans successful
- *      step stdout for `TAKOSUMI_ARTIFACT=<uri>`. v0 remains available as a
- *      legacy fallback via `--artifact-contract v0` or auto-detection.
+ *   4. Resolve the artifact URI. The current operator contract scans
+ *      successful step stdout for `TAKOSUMI_ARTIFACT=<uri>`.
  *   5. Substitute the resolved URI into the corresponding resource field.
  *      The default target is `resources[i].spec.image`; workflowRef.target
  *      may choose another dotted field below `spec`, such as
@@ -247,8 +246,8 @@ export function artifactContractResolver(
 }
 
 /**
- * Legacy v0 resolver: captures the last non-empty stdout line as the artifact
- * URI. Prefer `artifactContractResolver(..., "v1")` for new workflows.
+ * Internal v0 resolver retained for parser regression tests. Current operator
+ * workflows use `artifactContractResolver(..., "v1")`.
  */
 export function lastLineArtifactResolver(
   capturedLogs: () => readonly string[],

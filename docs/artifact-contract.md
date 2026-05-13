@@ -1,17 +1,16 @@
 # Artifact URI Contract
 
-> Stability: v1 Audience: workflow author, CLI implementer Owner: takosumi-git
+> このページでわかること: workflow の build 出力を artifact URI に解決する仕様。
 
-This document defines how `takosumi-git push` resolves a workflow output into
-the artifact URI that is written into the Takosumi manifest. The Takosumi kernel
-does not run builds, read workflow files, or interpret `workflowRef`; it only
-receives the cleaned manifest plus opaque deploy provenance over
-`POST /v1/deployments`.
+`takosumi-git push` は workflow 出力を Takosumi manifest に書き込む artifact URI
+へ解決します。Takosumi kernel は build を実行せず、workflow file も読まず、
+`workflowRef` も解釈しません。kernel は cleaned manifest と opaque な deploy
+provenance を `POST /v1/deployments` で受け取るだけです。
 
-## Scope
+## 適用範囲
 
-The contract applies when a manifest resource has a private takosumi-git
-extension:
+manifest の resource に takosumi-git の private extension がある場合に適用され
+ます。
 
 ```yaml
 resources:
@@ -26,20 +25,21 @@ resources:
       artifact: image
 ```
 
-`resources[i].workflowRef` is read by `takosumi-git push`, then stripped before
-the manifest is posted to the kernel. By default, the resolved URI is written to
-`resources[i].spec.image`. A resource can set `workflowRef.target` to another
-dotted field below `spec`, such as `spec.artifact.hash`, when the provider
-expects a different artifact field.
+`resources[i].workflowRef` は `takosumi-git push` が読み、kernel に manifest を
+送る前に strip します。解決された URI は既定で `resources[i].spec.image` に
+書き込まれ、provider が別の field を期待するときは `workflowRef.target` で
+`spec.artifact.hash` のような `spec` 配下のドット区切りパスを指定できます。
 
-## v1 Producer Rule
+## Producer rule
 
-The referenced workflow job must declare an `artifact` field and all selected
-steps must exit with status `0`. After the job succeeds, `takosumi-git push`
-scans captured step stdout chunks from the last step back to the first step and
-uses the final `TAKOSUMI_ARTIFACT=<uri>` marker it finds as the artifact URI.
+参照される workflow job は `artifact` フィールドを宣言し、選択された step が
+すべて status `0` で終了する必要があります。job
+が成功すると、`takosumi-git
+push` は最後の step から順に stdout chunk
+を遡り、最後に見つかった `TAKOSUMI_ARTIFACT=<uri>` marker を artifact URI
+として採用します。
 
-For a container image, print the immutable image URI through that marker:
+container image の場合、不変な image URI を marker として出力します。
 
 ```yaml
 version: "0"
@@ -55,67 +55,78 @@ jobs:
       name: image
 ```
 
-The v1 resolver intentionally does not parse JSON envelopes, files, or shell
-environment state from the child process. The marker must be printed to stdout.
-When the artifact is written to `spec.image` (the default target), the URI must
-be digest-pinned as `<image>@sha256:<64-hex>`. A resource can use
-`workflowRef.target` for provider-specific immutable artifact references that
-are not OCI image URIs.
+resolver は JSON envelope や file、子プロセスの shell 環境状態を parse しま
+せん。marker は stdout に出力する必要があります。`spec.image` (既定の target)
+に書き込む場合、URI は `<image>@sha256:<64-hex>` の digest pin 形式でなければ
+なりません。OCI image URI ではない provider 固有の不変 artifact reference を
+書き込むときは `workflowRef.target` を使います。
 
-## Stderr Handling
+## Stderr の扱い
 
-The default executor captures stderr separately and appends it to logs after a
-`[stderr]` separator for human debugging. The URI resolver only reads stdout
-before that separator. Printing a URI to stderr does not satisfy this contract.
+既定の executor は stderr を別に capture し、人間のデバッグ用に `[stderr]`
+セパレータの後ろに log として追記します。URI resolver はそのセパレータの前の
+stdout だけを読みます。stderr に URI を出力しても contract を満たしません。
 
-## Build Environment
+## Build 環境
 
-The default workflow executor runs build steps with a cleared process
-environment and only a small allowlist needed to locate shell tools and
-temporary directories (`PATH`, `HOME`, `TMPDIR`, `TMP`, `TEMP`, `USER`,
-`LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TERM`). Runtime credentials and operator
-tokens such as `TAKOS_TOKEN`, `TAKOSUMI_TOKEN`, `OIDC_CLIENT_SECRET`, or
-`DATABASE_URL` are not inherited by workflow steps. Build workflows must receive
-publish credentials through a future explicit build-secret mechanism, not
-through the operator process environment. `workflowRef.file` must be a relative
-path inside `.takosumi/workflows`; paths that escape the workflows directory,
-including symlink escapes, are rejected before execution.
+既定の workflow executor は build step を空の環境変数で起動し、shell tool と
+temporary directory を見つけるための小さな allowlist のみを継承します (`PATH` /
+`HOME` / `TMPDIR` / `TMP` / `TEMP` / `USER` / `LOGNAME` / `SHELL` / `LANG` /
+`LC_ALL` / `TERM`)。`TAKOS_TOKEN` / `TAKOSUMI_TOKEN` / `OIDC_CLIENT_SECRET` /
+`DATABASE_URL` のような runtime credential や operator token は workflow step
+に継承されません。publish credential は将来の明示的な build-secret
+機構経由で渡し、operator process の環境変数経由では渡しません。
+`workflowRef.file` は `.takosumi/workflows` 内の相対パスでなければならず、
+workflows ディレクトリの外を指すパス (symlink escape を含む) は実行前に
+拒否されます。
 
-## Failure Modes
+## 失敗パターン
 
-| Condition                                  | Result                                                                                                           |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| Referenced workflow file or job is missing | `push` fails before POST                                                                                         |
-| A selected step exits non-zero             | `push` fails before POST and includes the job logs                                                               |
-| The job has no `artifact` field            | `push` fails before POST                                                                                         |
-| v1 job produces no marker                  | `push` fails with `workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI` |
-| `spec.image` URI is not digest-pinned      | `push` fails before POST                                                                                         |
+| 条件                                        | 結果                                                                                                            |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 参照する workflow file / job が無い         | POST 前に `push` が失敗                                                                                         |
+| 選択された step が非ゼロで終了              | POST 前に `push` が失敗し、job log を含めて報告                                                                 |
+| job に `artifact` フィールドが無い          | POST 前に `push` が失敗                                                                                         |
+| job が marker を出力しない                  | `workflow job '<job>' produced no TAKOSUMI_ARTIFACT=<uri> marker; cannot resolve artifact URI` で `push` が失敗 |
+| `spec.image` URI が digest pin されていない | POST 前に `push` が失敗                                                                                         |
 
-`--dry-run` still executes the workflow and resolves the URI, but it prints the
-cleaned manifest instead of sending `POST /v1/deployments`.
+`--dry-run` でも workflow は実行され URI
+も解決されますが、`POST
+/v1/deployments` は送らず cleaned manifest
+を出力します。
 
-## Provenance Chain
+## Provenance chain
 
-For every resolved artifact, `takosumi-git push` records:
+`takosumi-git push` は解決した artifact ごとに次を記録します。
 
 - workflow run id (`takosumi-git:run:<uuid>`)
-- git repository / ref / commit metadata when available
-- resource name, workflow file/job/artifact, resolved artifact URI, and optional
+- 利用可能な場合は git repository / ref / commit の metadata
+- resource 名、workflow file / job / artifact、解決後の artifact URI、任意の
   artifact digest
-- per-step stdout digest, byte count, exit code, and step name
+- step ごとの stdout digest、byte count、exit code、step 名
 
-The resource receives `metadata.takosumiGitProvenance` with the workflow run id,
-git commit SHA, artifact URI, provenance digest, and step log digests. The
-`POST /v1/deployments` body also includes a top-level
-`takosumi-git.deployment-provenance@v1` object. The Takosumi kernel persists
-that JSON as opaque WAL evidence; it does not execute or interpret the workflow.
+resource には `metadata.takosumiGitProvenance` として workflow run id、git
+commit SHA、artifact URI、provenance digest、step log digest が付与されます。
+`POST /v1/deployments` の body にも top-level の
+`takosumi-git.deployment-provenance@v1` object が含まれます。Takosumi kernel は
+この JSON を opaque な WAL evidence として永続化するだけで、workflow を実行
+したり解釈したりはしません。
 
-## Drift Check
+## 関連ページ
 
-- Source of truth: `packages/cli/src/push.ts` (`artifactContractResolver`,
+- [WorkflowRef](./workflow-ref.md) — `workflowRef` の構造と解決フロー
+- [Quickstart](./quickstart.md) — 最初の push までの手順
+
+## Drift check
+
+- 実装: `packages/cli/src/push.ts` (`artifactContractResolver`,
   `lastLineArtifactResolver`, `parseArtifactContract`,
   `setResourceArtifactTarget`, `setResourceProvenanceMetadata`,
-  `stripWorkflowRefs`).
-- Contract types: `packages/workflow-contract/src/mod.ts` (`ComputeWorkflowRef`,
-  `ResolvedArtifact`, `WorkflowJobSpec`).
-- Tests: `packages/cli/src/push_test.ts` and `docs/artifact-contract_test.ts`.
+  `stripWorkflowRefs`)
+- Contract 型: `packages/workflow-contract/src/mod.ts` (`ComputeWorkflowRef`,
+  `ResolvedArtifact`, `WorkflowJobSpec`)
+- Tests: `packages/cli/src/push_test.ts`、`docs/artifact-contract_test.ts`
+
+Implementation drift anchors: the default executor uses a cleared process,
+workflow files must be a path inside `.takosumi/workflows`, and a default
+`spec.image` URI is not digest-pinned failure blocks the kernel request.

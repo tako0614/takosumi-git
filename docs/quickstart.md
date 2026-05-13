@@ -1,23 +1,22 @@
 # Quickstart
 
-> Stability: v1 Audience: workflow author Owner: takosumi-git
+> このページでわかること: takosumi-git の初回セットアップと最初の push
+> までの手順。
 
-This quickstart uses the source checkout. After the JSR publish step lands, the
-same flow should work through
-`deno install -gA -n takosumi-git
-jsr:@takos/takosumi-git-cli`. The installed
-command equivalents are `takosumi-git init`, `takosumi-git push`, and
-`takosumi-git install`.
+このページはソースチェックアウトを使った手順です。JSR publish 後は
+`deno install -gA -n takosumi-git jsr:@takos/takosumi-git-cli` でインストール
+した `takosumi-git init` / `takosumi-git push` / `takosumi-git install` も
+同じ流れで使えます。
 
 ## 1. Scaffold
 
-From the root of the app repository:
+アプリリポジトリのルートで実行します。
 
 ```bash
 deno run -A /path/to/takosumi-git/packages/cli/src/main.ts init --name demo
 ```
 
-This writes:
+次のファイルが作成されます。
 
 ```text
 .takosumi/
@@ -27,26 +26,28 @@ This writes:
     └── build.yml
 ```
 
-The Takosumi kernel does not read this directory. It is a takosumi-git project
-convention.
+このディレクトリは takosumi-git のプロジェクト規約で、Takosumi kernel は読み
+ません。
 
-## 2. Edit Install Metadata
+## 2. インストールメタデータを編集
 
-Open `.takosumi/app.yml` and set publisher metadata, source pins, runtime modes,
-bindings, and requested permissions. `takosumi-git install preview` reads this
-file without mutating Accounts or the kernel:
+`.takosumi/app.yml` に publisher、source pin、runtime mode、binding、 permission
+を設定します。Accounts と kernel を変更せずプレビューを確認 できます。
 
 ```bash
 deno run -A /path/to/takosumi-git/packages/cli/src/main.ts install preview --json
 ```
 
-See [Install Preview and Apply](./install.md) for the InstallableApp v1 contract
-and Accounts apply flow.
+パッケージインストール後は `takosumi-git install preview` で同じ動作になり
+ます。上記の `deno run` 形式はソースチェックアウト用の等価コマンドです。
 
-## 3. Edit the Manifest
+InstallableApp v1 の contract と Accounts への apply フローは
+[Install Preview and Apply](./install.md) を参照してください。
 
-Open `.takosumi/manifest.yml` and set the resource shape, provider, and spec.
-Resources that need a build output use `resources[i].workflowRef`:
+## 3. マニフェストを編集
+
+`.takosumi/manifest.yml` に resource の shape / provider / spec を書きます。
+ビルド成果物が必要なリソースは `resources[i].workflowRef` を使います。
 
 ```yaml
 resources:
@@ -61,14 +62,14 @@ resources:
       artifact: image
 ```
 
-See [WorkflowRef](./workflow-ref.md) for the field contract. The workflow file
-path must stay inside `.takosumi/workflows`; `../` and absolute path escape are
-rejected.
+フィールドの詳細は [WorkflowRef](./workflow-ref.md) を参照してください。
+workflow ファイルのパスは `.takosumi/workflows` 配下でなければならず、`../`
+や絶対パスでの escape は拒否されます。
 
-## 4. Make the Workflow Print an Artifact URI Marker
+## 4. workflow に artifact URI marker を出力させる
 
-Open `.takosumi/workflows/build.yml`. Artifact URI v1 is the default contract:
-the successful workflow must print `TAKOSUMI_ARTIFACT=<uri>` to stdout.
+`.takosumi/workflows/build.yml` を開きます。Artifact URI v1 では、成功した
+workflow が `TAKOSUMI_ARTIFACT=<uri>` を stdout に出力する必要があります。
 
 ```yaml
 version: "0"
@@ -84,14 +85,14 @@ jobs:
       name: image
 ```
 
-See [Artifact URI Contract](./artifact-contract.md) for the v1 marker, and
-failure semantics.
+v1 marker と failure 時の挙動は [Artifact URI Contract](./artifact-contract.md)
+を参照してください。
 
-## 5. Dry Run
+## 5. ドライラン
 
-Dry-run executes workflows, strips `workflowRef`, writes the resolved URI into
-`resources[i].spec.image` by default, or into `workflowRef.target` when set, and
-prints the cleaned manifest without sending it to the kernel:
+dry-run は workflow を実行して `workflowRef` を strip し、resolved URI を
+`resources[i].spec.image` (または設定されていれば `workflowRef.target`)
+に書き込み、整形後の manifest を出力します。kernel には送信しません。
 
 ```bash
 deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push --dry-run
@@ -99,7 +100,7 @@ deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push --dry-run
 
 ## 6. Apply
 
-When the manifest looks correct, submit it to a Takosumi kernel:
+manifest に問題がなければ Takosumi kernel に送信します。
 
 ```bash
 deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push \
@@ -107,8 +108,27 @@ deno run -A /path/to/takosumi-git/packages/cli/src/main.ts push \
   --token "$TAKOSUMI_TOKEN"
 ```
 
-`push` sends the cleaned Takosumi v1 manifest and an opaque
-`takosumi-git.deployment-provenance@v1` chain to `POST /v1/deployments`. The
-kernel never receives `.takosumi/workflows/*.yml` or `workflowRef`, and it does
-not execute or interpret workflows; it only records the provenance JSON for
-audit.
+`push` は整形済みの Takosumi v1 manifest と
+`takosumi-git.deployment-provenance@v1` を `POST /v1/deployments` に送ります。
+kernel は `.takosumi/workflows/*.yml` や `workflowRef` を受け取らず、workflow
+を実行・解釈しません。provenance JSON は監査用に記録するだけです。
+
+## Implementation drift anchors
+
+```text
+ARTIFACT_MARKER_PREFIX
+clearEnv: true
+WORKFLOW_ENV_ALLOWLIST
+resolveWorkflowFilePath
+validateResolvedArtifactTarget
+spec.image artifacts must be digest-pinned
+artifactContractResolver
+lastLineArtifactResolver
+parseArtifactContract
+setResourceArtifactTarget
+stripWorkflowRefs
+workflow job '${jobName}' produced no ${ARTIFACT_MARKER_PREFIX}<uri> marker; cannot resolve artifact URI
+workflow job '${jobName}' produced no stdout; cannot resolve artifact URI
+```
+
+Workflow files must stay inside `.takosumi/workflows`.

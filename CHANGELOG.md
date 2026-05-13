@@ -8,8 +8,8 @@ the package version of `@takos/takosumi-git-cli`.
 - Added artifact URI contract v1: workflow steps now print
   `TAKOSUMI_ARTIFACT=<uri>` and `takosumi-git push` resolves that marker by
   default.
-- Added `--artifact-contract v0|v1|auto`; v0 keeps the last non-empty stdout
-  line resolver as an explicit legacy mode, and `auto` tries v1 before v0.
+- Current operator contract is v1 marker resolution by default. Non-v1 resolver
+  modes remain internal parser-regression coverage, not operator docs.
 - Updated `takosumi-git init`, README, quickstart, and artifact contract docs to
   generate and document v1 marker output.
 - Implemented `takosumi-git history` with manifest commit listing and
@@ -25,14 +25,13 @@ the package version of `@takos/takosumi-git-cli`.
   `apiVersion / kind / metadata / template /
   resources[]`; the private
   `workflowRef` extension lives at `resources[i].workflowRef` (sibling of
-  `shape` / `spec` / `name` / etc.) rather than the legacy
+  `shape` / `spec` / `name` / etc.) rather than the previous
   `compute.<name>.workflowRef` form. The resolved artifact URI is substituted
   into `resources[i].spec.image`. This matches what `takosumi-git init` already
   scaffolds and what the takosumi kernel accepts on `POST /v1/deployments`.
 - All `push` tests rewritten against the v1 envelope.
-- Added `docs/artifact-contract.md` to make the v0 artifact URI contract
-  explicit: `push` resolves the last non-empty stdout line from successful
-  workflow steps into `resources[i].spec.image` before stripping `workflowRef`.
+- Added `docs/artifact-contract.md` to document artifact URI resolution and the
+  current v1 marker contract.
 - Added `docs/quickstart.md` and `docs/workflow-ref.md`; README now links the
   minimum publish-ready docs set.
 - `@takos/takosumi-git-deploy-client` now sends `X-Idempotency-Key` and retries

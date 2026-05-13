@@ -1,10 +1,13 @@
 # `.takosumi/app.yml` Spec (InstallableApp v1)
 
+> このページでわかること: `.takosumi/app.yml` の全フィールドと validation
+> ルール。
+
 `.takosumi/app.yml` は **installer-bound manifest** です。Git URL から install
 できる app の identity / source / binding / permission / upgrade policy を 1
-ファイルで宣言し、takosumi-git (installer) の唯一 の入口として機能します。本
-spec は v1 の field 定義と `.takosumi/manifest.yml` (authoring compute manifest;
-compile 後に compiled Shape manifest になる) との関係を確定します。
+ファイルで宣言し、takosumi-git (installer) の入口として機能します。本ページは
+field 定義と `.takosumi/manifest.yml` (authoring compute manifest; compile 後に
+compiled Shape manifest になる) との関係を定義します。
 
 ## 1. `apiVersion` / `kind` の固定 literal
 
@@ -18,9 +21,10 @@ kind: InstallableApp
 - `kind` は必ず `InstallableApp` の string 一致。他値は parser error です
 - 両 field は document の root に直接置きます。nested は不可です
 
-minor compatible extension (新 optional field の追加) は v1 のまま行います。
-field の削除 / 意味変更が必要な場合は `app.takosumi.dev/v2` への bump が
-要ります。
+takosumi-git が pre-1.0 の間は、current v1 spec / parser / tests / docs を同じ
+変更で一貫更新します。public 1.0 後は、新しい optional field の追加は v1 のまま
+行い、field の削除や意味変更が必要なときは `app.takosumi.dev/v2` への bump で
+扱います。
 
 ---
 
@@ -98,9 +102,9 @@ source:
   ではない** こと、かつ **再度 resolve したときに同じ commit を指す** ことを確認
 - 違反時: parser stage で reject (`ref looks mutable: ...`)
 
-根拠は 本書および §22.1。install したものの中身を後から説明できる
-ようにするため、commit と manifest digest が命綱になります。source commit / app
-manifest digest / artifact digest / compiled manifest digest の chain は
+install した内容を後から説明できるようにするため、commit と manifest digest が
+命綱になります。source commit / app manifest digest / artifact digest / compiled
+manifest digest の chain は
 [Supply Chain Trust](../../../takosumi/docs/reference/supply-chain-trust.md)
 を参照してください。
 
@@ -193,8 +197,8 @@ deploy-intent.gitops@v1
 install-launch-token@v1
 ```
 
-7 種目以降を追加するときは Binding Catalog の lockstep 拡張を要します (任意 type
-の発明は不可)。
+これら以外の type を追加するときは Binding Catalog を lockstep で拡張する
+必要があります (任意 type を独自に発明することはできません)。
 
 Operator / account plane / billing dependency は AppBinding type
 ではありません。OIDC は `operator.identity.oidc`、billing は
@@ -212,10 +216,10 @@ AppInstallation の materialization result で account-plane-backed placeholder
 materialization phase がないため、installer-only placeholder を deploy
 前に拒否します。
 
-### 3.5.1 Namespace exports are not `app.yml` fields
+### 3.5.1 Namespace export は `app.yml` のフィールドではない
 
-`serviceImports[]` は current `app.yml` field ではありません。外部 dependency
-を表す必要がある場合は、次のどれかに戻して表現します。
+`app.yml` に `serviceImports[]` フィールドはありません。外部 dependency を
+表す必要がある場合は、次のいずれかで表現します。
 
 - install-time resource / credential: `bindings` の closed catalog
 - user-approved permission: `permissions.requested` の AppGrant catalog
@@ -287,7 +291,7 @@ mcp:invoke
 events:subscribe
 ```
 
-- Install preview で **必ず一覧表示** されます (本書および ROADMAP / AGENTS.md)
+- Install preview で **必ず一覧表示** されます
 - install 完了時に Takosumi Accounts が AppInstallation に対して各 capability の
   AppGrant を発行します。user は post-install に AppGrant を revoke 可能です。
 - `openid` / `profile` / `email` などの OIDC scope は
@@ -338,7 +342,7 @@ compatibility:
 
 ## 4. 完全な YAML 例
 
-本書の generic InstallableApp 例を canonical fixture として再掲します。
+generic な InstallableApp の完全な例:
 
 ```yaml
 apiVersion: app.takosumi.dev/v1
@@ -474,9 +478,8 @@ installer pipeline の Step 3〜11 でのみ参照されます。
 
 kernel が受理するのは `apiVersion: "1.0"` + `kind: Manifest` の Compiled
 manifest のみで、`apiVersion: "app.takosumi.dev/v1"` を **知りません**。
-これによって kernel は Auth / Account / Billing / Marketplace / Workflow
-を一切持たない compute substrate のままを保ちます (本書および ROADMAP /
-AGENTS.md)。
+これによって kernel は Auth / Account / Billing / Marketplace / Workflow を
+一切持たない compute substrate のままを保ちます。
 
 ### compile pipeline の位置
 

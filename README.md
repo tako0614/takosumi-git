@@ -1,67 +1,75 @@
 # takosumi-git
 
-`takosumi-git` is a sibling product of
-[`takosumi`](https://github.com/tako0614/takosumi) that bridges git repositories
-and the takosumi manifest deploy engine.
+`takosumi-git` は [`takosumi`](https://github.com/tako0614/takosumi) の姉妹
+プロダクトで、Git リポジトリと takosumi
+マニフェストデプロイエンジンを橋渡しします。
 
-## What it does
+## 機能概要
 
-1. Watches a git repository (push / PR / tag) or receives webhook events.
-2. Runs the build pipeline declared under `.takosumi/workflows/` (image build,
-   artifact upload).
-3. Resolves artifact URIs and generates a `Manifest` document.
-4. Submits the manifest and opaque deployment provenance to a takosumi kernel
-   via `POST /v1/deployments`.
-5. Treats the git history of the manifest as the authoritative version history.
+1. Git リポジトリ (push / PR / tag) を監視するか、webhook イベントを受け取る
+2. `.takosumi/workflows/` 配下のビルドパイプライン (image build, artifact
+   upload) を実行する
+3. アーティファクト URI を解決し、`Manifest` ドキュメントを生成する
+4. マニフェストと opaque なデプロイプロベナンスを takosumi カーネルに
+   `POST /v1/deployments` で送信する
+5. マニフェストの Git 履歴をバージョン履歴の正本として扱う
 
-The takosumi kernel itself remains a pure manifest deploy engine — it never sees
-workflow definitions, never schedules anything, never runs workflow steps, and
-never interprets git semantics. `takosumi-git` may attach an opaque
-`takosumi-git.deployment-provenance@v1` JSON chain so the kernel WAL can record
-which workflow run, git commit, artifact URI, and step log digests produced the
-deployed manifest.
+takosumi カーネル自体は純粋なマニフェストデプロイエンジンであり、ワークフロー
+定義の解釈、スケジューリング、Git セマンティクスの解釈は行いません。
+`takosumi-git` は opaque な `takosumi-git.deployment-provenance@v1` JSON
+チェーンを添付し、どのワークフロー実行 / Git コミット / アーティファクト URI /
+ステップログダイジェストからマニフェストが生まれたかをカーネルの WAL
+に記録できます。
 
 ## Quick start
 
 ```bash
-# from the root of your repo
-takosumi-git init                  # scaffolds .takosumi/app.yml + manifest.yml + workflows/build.yml
-$EDITOR .takosumi/app.yml          # set install metadata / bindings / permissions
-$EDITOR .takosumi/manifest.yml     # set image URI policy / resources
+# リポジトリのルートで実行
+takosumi-git init                  # .takosumi/app.yml + manifest.yml + workflows/build.yml を生成
+$EDITOR .takosumi/app.yml          # インストールメタデータ / バインディング / 権限を設定
+$EDITOR .takosumi/manifest.yml     # image URI ポリシー / リソースを設定
 takosumi-git push --endpoint $TAKOSUMI_ENDPOINT --token $TAKOSUMI_TOKEN
 ```
 
-The `.takosumi/` project layout is owned by `takosumi-git`. The takosumi kernel
-takes manifests by explicit path or HTTP body and has no opinion on file layout
-— see [AGENTS.md](./AGENTS.md) for the full convention.
+`.takosumi/` プロジェクトレイアウトは `takosumi-git` の所有です。takosumi
+カーネルは明示的なパスまたは HTTP body でマニフェストを受け取るだけで、
+ファイルレイアウトについての意見は持ちません。完全な convention は
+[AGENTS.md](./AGENTS.md) を参照してください。
 
-## Status
+## 機能
 
-`takosumi-git init`, `push`, `install`, `import`, `upgrade`, `rollback`,
-`materialize`, `export`, `serve`, and `history` are implemented. `init`
-scaffolds the `.takosumi/` project layout (`app.yml` + `manifest.yml` +
-`workflows/build.yml`). `push` parses `.takosumi/manifest.yml` (a takosumi v1
-manifest envelope), resolves each `resources[i].workflowRef` by running the
-referenced workflow job's steps (via `bash -lc`) and reading the v1
-`TAKOSUMI_ARTIFACT=<uri>` stdout marker, substitutes the resolved artifact URI
-into that resource entry's `spec.image` field, strips the private `workflowRef`
-extension, attaches resource-level provenance metadata plus a top-level
-deployment provenance chain, and posts the cleaned manifest to a takosumi kernel
-via `POST /v1/deployments`. `install` previews `.takosumi/app.yml`, creates an
-AppInstallation in Takosumi Accounts, can deploy the compiled manifest to a
-kernel, injects materialized runtime env, and patches installation status.
-`upgrade` / `rollback` preview or apply source revision changes through the
-Accounts ledger; `serve` exposes the same revision preview/apply flow for
-product UIs. `import` reads a JSON AppInstallation export bundle or a `tar.zst`
-archive containing `takos-export/bundle.json` and posts it to Takosumi Accounts.
-`materialize` requests shared-cell to dedicated runtime materialization, and
-`export` requests a self-host bundle operation through Takosumi Accounts;
-`export --output` polls the export operation when needed and writes the
-completed `downloadUrl` bundle. `history` lists manifest commits and renders
-per-resource semantic diffs. `serve` exposes GitHub / GitLab / Gitea webhook
-routes with signature verification, rate limiting, delivery dedup, queue
-draining, push dispatch, and install/revision preview/apply HTTP APIs. See
-[AGENTS.md](./AGENTS.md) for package layout and design boundaries.
+`takosumi-git init`、`push`、`install`、`import`、`upgrade`、`rollback`、
+`materialize`、`export`、`serve`、`history` を実装しています。
+
+- `init`: `.takosumi/` プロジェクトレイアウト (`app.yml` + `manifest.yml` +
+  `workflows/build.yml`) を生成
+- `push`: `.takosumi/manifest.yml` (takosumi v1 マニフェスト envelope) を読み、
+  各 `resources[i].workflowRef` を参照されたワークフロージョブのステップ実行
+  (`bash -lc`) で解決して v1 `TAKOSUMI_ARTIFACT=<uri>` stdout マーカーを読み、
+  該当リソースエントリの `spec.image` フィールドに置換、private な `workflowRef`
+  拡張を strip、リソースレベルのプロベナンスと top-level デプロイプロベナンス
+  チェーンを添付し、整形済みマニフェストを takosumi カーネルの
+  `POST /v1/deployments` に投稿
+- `install`: `.takosumi/app.yml` を preview し、Takosumi Accounts に
+  AppInstallation を作成。コンパイル済みマニフェストをカーネルにデプロイし、
+  マテリアライズされた runtime env を注入してインストール状態を更新
+- `upgrade` / `rollback`: ソースリビジョン変更を Accounts 台帳経由で preview /
+  apply
+- `serve`: 同じリビジョン preview / apply フローをプロダクト UI 向けに公開。
+  GitHub / GitLab / Gitea webhook ルート (署名検証、レート制限、配信 dedup、
+  キュードレイン、push dispatch、install / revision preview / apply HTTP API)
+  も提供
+- `import`: JSON AppInstallation export bundle または `takos-export/bundle.json`
+  を含む `tar.zst` アーカイブを読み、Takosumi Accounts に投稿
+- `materialize`: shared-cell から dedicated ランタイムへのマテリアライズを要求
+- `export`: Takosumi Accounts 経由で self-host bundle 操作を要求。
+  `export --output` は必要に応じて export 操作をポーリングし、完成した
+  `downloadUrl` のバンドルを書き出す
+- `history`: マニフェストコミットを一覧し、リソース毎のセマンティック diff
+  を表示
+
+詳細なパッケージレイアウトと設計境界は [AGENTS.md](./AGENTS.md)
+を参照してください。
 
 ## Docs
 
@@ -72,11 +80,11 @@ draining, push dispatch, and install/revision preview/apply HTTP APIs. See
 - [History](./docs/history.md)
 - [Serve](./docs/serve.md)
 
-## Release
+## リリース
 
-Semver tags (`v*.*.*`) run `.github/workflows/release.yml`. The workflow checks
-the workspace, runs tests, performs a JSR dry-run, then publishes the
-takosumi-git JSR package set with GitHub OIDC. Manual workflow runs stay dry-run
-unless the explicit `publish` input is set. Tags are repository-level release
-markers; every publishable package version must already be bumped to the
-intended unpublished JSR version before tagging.
+Semver タグ (`v*.*.*`) で `.github/workflows/release.yml` が実行されます。
+ワークフローはチェックとテスト、JSR dry-run を経て、GitHub OIDC で takosumi-git
+JSR パッケージセットを publish します。手動実行は明示的に `publish`
+入力を指定しない限り dry-run のままです。タグはリポジトリレベルの
+リリースマーカーであり、publish 対象のパッケージバージョンは事前に未公開の JSR
+バージョンに上げてからタグを打ちます。

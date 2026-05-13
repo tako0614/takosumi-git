@@ -1,12 +1,13 @@
 # WorkflowRef
 
-> Stability: v0 Audience: workflow author, CLI implementer Owner: takosumi-git
+> このページでわかること: `workflowRef` の構造と workflow → artifact URI
+> 解決の仕組み。
 
-`workflowRef` is a private takosumi-git extension placed on a Takosumi v1
-manifest resource. It is not part of the Takosumi kernel manifest schema and is
-always stripped before `POST /v1/deployments`.
+`workflowRef` は takosumi-git の私的拡張で、Takosumi v1 manifest の resource に
+追加して使います。kernel manifest schema には含まれず、`POST /v1/deployments`
+に送る前に必ず strip されます。
 
-## Shape
+## 構造
 
 ```ts
 interface ComputeWorkflowRef {
@@ -17,7 +18,7 @@ interface ComputeWorkflowRef {
 }
 ```
 
-Placement:
+配置例:
 
 ```yaml
 resources:
@@ -34,36 +35,35 @@ resources:
       target: spec.image
 ```
 
-| Field      | Meaning                                                                                             |
-| ---------- | --------------------------------------------------------------------------------------------------- |
-| `file`     | Workflow YAML file name resolved relative to `--workflows-dir` (default `.takosumi/workflows`)      |
-| `job`      | Job name inside the workflow file                                                                   |
-| `artifact` | Artifact name expected from the job; used as the fallback resolved artifact name                    |
-| `target`   | Optional dotted field path below `spec`; defaults to `spec.image`, for example `spec.artifact.hash` |
+| フィールド | 意味                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| `file`     | workflow YAML のファイル名 (`--workflows-dir` (既定 `.takosumi/workflows`) からの相対パス) |
+| `job`      | workflow ファイル内の job 名                                                               |
+| `artifact` | job が出力する artifact 名 (resolved artifact 名のフォールバックにも使われる)              |
+| `target`   | `spec` 配下のドット区切りパス (省略時は `spec.image`、例: `spec.artifact.hash`)            |
 
-## Resolution Flow
+## 解決フロー
 
-1. `takosumi-git push` reads `.takosumi/manifest.yml`.
-2. It finds every `resources[i].workflowRef`.
-3. It loads `workflowRef.file` from the workflows directory. The file value must
-   be a relative path inside `.takosumi/workflows`; absolute paths, `../`
-   escape, and symlink escape are rejected before execution.
-4. It runs `workflowRef.job`.
-5. It resolves the job artifact URI according to
-   [Artifact URI Contract](./artifact-contract.md).
-6. It writes the URI to `workflowRef.target`, or to `resources[i].spec.image`
-   when `target` is omitted.
-7. It adds resource-level `metadata.takosumiGitProvenance` with digests for the
-   resolved artifact chain.
-8. It deletes `workflowRef` from every resource entry.
-9. It submits the cleaned manifest plus top-level deployment provenance to the
-   kernel unless `--dry-run` was passed.
+1. `takosumi-git push` が `.takosumi/manifest.yml` を読みます
+2. すべての `resources[i].workflowRef` を検出します
+3. workflows ディレクトリから `workflowRef.file` を読み込みます (絶対パス、
+   `../` での escape、symlink escape は実行前に拒否されます)
+4. `workflowRef.job` を実行します
+5. [Artifact URI Contract](./artifact-contract.md) に従って artifact URI
+   を解決します
+6. URI を `workflowRef.target` (省略時は `resources[i].spec.image`)
+   に書き込みます
+7. resource-level の `metadata.takosumiGitProvenance` に artifact chain の
+   digest を追加します
+8. すべての resource から `workflowRef` を削除します
+9. 整形後の manifest と deployment provenance を kernel に送信します
+   (`--dry-run` の場合は送信しません)
 
-Resource entries without `workflowRef` are left unchanged.
+`workflowRef` を持たない resource はそのまま残ります。
 
-## Kernel Boundary
+## kernel に届くもの
 
-Takosumi kernel only sees this:
+kernel が受け取るのは次の形だけです。
 
 ```yaml
 resources:
@@ -84,25 +84,33 @@ resources:
           - sha256:...
 ```
 
-The kernel also receives an optional top-level
-`takosumi-git.deployment-provenance@v1` JSON object containing the workflow run
-id, git metadata, artifact URI, and per-step stdout digests. That payload is
-opaque audit evidence: the kernel records it in its WAL but does not load
-workflow files, execute jobs, parse build logs, or interpret git semantics.
-Build and git concerns stay in takosumi-git.
+kernel は加えてオプションの `takosumi-git.deployment-provenance@v1` JSON
+オブジェクト (workflow run id、git metadata、artifact URI、step ごとの stdout
+digest) も受け取ります。kernel はこの payload を WAL に記録するだけで、 workflow
+ファイルの読み込み、job 実行、build ログの解析、git の解釈は行いません。 build
+と git の責務は takosumi-git 側に閉じます。
 
-## Validation and Errors
+## バリデーションとエラー
 
-`push` requires `file`, `job`, and `artifact` to be strings. `target`, when
-present, must be a dotted field path below `spec`. Invalid entries fail before
-the kernel request with:
+`push` は `file` / `job` / `artifact` が文字列であることを要求します。 `target`
+が指定されている場合、`spec` 配下のドット区切りパスでなければ
+なりません。不正な値は kernel リクエスト前にエラーになります。
 
 ```text
 resources[i].workflowRef must have string {file, job, artifact, target?}
 resources[i].workflowRef.target must be a dotted field path below spec, such as spec.image or spec.artifact.hash
 ```
 
-If the workflow job is missing, a step fails, or no artifact URI can be
-resolved, `push` fails before `POST /v1/deployments`. See
-[Artifact URI Contract](./artifact-contract.md) for artifact-specific failure
-modes.
+workflow job が存在しない、step が失敗する、artifact URI が解決できない場合は
+`POST /v1/deployments` 前に `push` が失敗します。artifact 固有の失敗パターンは
+[Artifact URI Contract](./artifact-contract.md) を参照してください。
+
+## Implementation drift anchors
+
+- `takosumi-git init`
+- `.takosumi/app.yml`
+- `takosumi-git install preview`
+- [Install Preview and Apply](./install.md)
+- `takosumi-git/packages/cli/src/main.ts push --dry-run`
+- workflow files must stay inside `.takosumi/workflows`
+- stripped before `POST /v1/deployments`

@@ -1,70 +1,72 @@
 # Install Preview and Apply
 
-`takosumi-git install` is the installer-facing command family for
-`.takosumi/app.yml`. The app file is installer-bound metadata: it is parsed by
-takosumi-git, shown to the user before approval, and used to create an
-AppInstallation ledger record in Takosumi Accounts. It is never posted to the
-takosumi kernel. When apply is given a Takosumi kernel endpoint, the compiled
-kernel manifest is posted separately after the Accounts ledger request.
+> このページでわかること: `takosumi-git install` で app.yml を preview / apply
+> する手順。
 
-## Files
+`takosumi-git install` は `.takosumi/app.yml` を扱う installer 系コマンドです。
+app.yml は installer-bound metadata で、takosumi-git が解析してユーザーに承認
+画面を表示し、Takosumi Accounts に AppInstallation 台帳レコードを作成するため
+に使います。kernel には送信しません。Takosumi kernel endpoint も渡された場合
+は、Accounts への ledger リクエストの後で compiled kernel manifest を別途
+送信します。
 
-A repository that supports Git URL install contains both installer metadata and
-the kernel manifest:
+## ファイル
+
+Git URL install に対応するリポジトリは、installer metadata と kernel manifest
+の両方を持ちます。
 
 ```text
-.takosumi/app.yml       # InstallableApp v1, read by takosumi-git
-.takosumi/manifest.yml  # authoring compute manifest, compiled before kernel deploy
+.takosumi/app.yml       # InstallableApp v1 (takosumi-git が読む)
+.takosumi/manifest.yml  # authoring compute manifest (kernel deploy 前に compile)
 ```
 
-`app.yml` must use:
+`app.yml` は次の指定が必須です。
 
 ```yaml
 apiVersion: app.takosumi.dev/v1
 kind: InstallableApp
 ```
 
-The parser rejects unknown fields, mutable refs such as `main` or `HEAD`, and
-binding or permission names outside the v1 catalogs.
+未知のフィールド、`main` / `HEAD` などの mutable ref、v1 catalog にない binding
+や permission 名は parser がエラーで弾きます。
 
-## Preview
+## プレビュー
 
-Use preview before creating any ledger record:
+ledger を作成する前に preview を実行します。
 
 ```bash
 takosumi-git install preview --cwd . --json
 ```
 
-Preview can also read directly from a Git source. The ref must be immutable
-enough for approval evidence: a full commit SHA, a semver tag, a release tag, or
-`refs/tags/<tag>`.
+Git ソースから直接 preview することもできます。ref は immutable である必要が
+あり、full commit SHA、semver tag、release tag、または `refs/tags/<tag>` が
+使えます。
 
 ```bash
 takosumi-git install preview https://github.com/example/hello --ref v1.2.3 --json
 ```
 
-The preview response is `takosumi-git.install-preview@v1` and includes:
+preview のレスポンスは `takosumi-git.install-preview@v1` で、次を含みます:
 
-- `previewId` and `expiresAt` for the approval record
-- app identity, publisher, homepage
-- source git URL, ref, optional commit, and manifest digests
-- runtime modes
-- requested binding kinds
-- requested AppGrant capabilities
+- `previewId` と `expiresAt` (approval 用)
+- app identity、publisher、homepage
+- source の Git URL、ref、commit、manifest digest
+- runtime mode 一覧
+- 要求される binding 種別
+- 要求される AppGrant capability
 - permission digest
-- risk reasons and `approvalRequired`
-- cost metadata
+- リスク理由と `approvalRequired`
+- コスト情報
 
-The AppGrant catalog includes generic installer capabilities such as
-`deploy.intent.write` plus Takos resource scopes such as `files:read`,
-`threads:write`, `agents:execute`, `mcp:invoke`, and `events:subscribe`.
+AppGrant catalog には `deploy.intent.write` のような installer 用 capability
+に加えて、`files:read` / `threads:write` / `agents:execute` / `mcp:invoke` /
+`events:subscribe` などの Takos リソーススコープが含まれます。
 
-Preview is non-mutating. It does not call Takosumi Accounts and does not call
-the takosumi kernel.
+preview は副作用がありません。Takosumi Accounts も takosumi kernel
+も呼びません。
 
-When running `takosumi-git serve`, the same preview surface is available as a
-non-mutating API. The body can provide inline `appYml` / `manifestYml`, or a Git
-source:
+`takosumi-git serve` を起動すると、同じ preview が HTTP API として利用できます。
+body には inline `appYml` / `manifestYml` または Git ソースを指定します。
 
 ```text
 POST /v1/install/preview
@@ -77,17 +79,17 @@ POST /v1/install/preview
 }
 ```
 
-`takosumi-git serve` also exposes a mutating apply API for operators that want
-the same install pipeline behind HTTP:
+`takosumi-git serve` は同じ install pipeline を HTTP 経由で実行するための apply
+API も公開しています。
 
 ```text
 POST /v1/install/apply
 Authorization: Bearer <serve-token>
 ```
 
-The serve process must be started with `--accounts-url` and `--accounts-token`
-(or `TAKOSUMI_ACCOUNTS_URL` / `TAKOSUMI_ACCOUNTS_TOKEN`). The request body uses
-a Git source plus ledger target fields:
+serve プロセスを起動するときに `--accounts-url` と `--accounts-token` を渡す
+(または `TAKOSUMI_ACCOUNTS_URL` / `TAKOSUMI_ACCOUNTS_TOKEN` を設定する) 必要が
+あります。リクエスト body は Git ソース + ledger ターゲットの形です。
 
 ```json
 {
@@ -102,20 +104,19 @@ a Git source plus ledger target fields:
 }
 ```
 
-The response kind is `takosumi-git.install-apply@v1`. The JSON response also
-includes `accounts.installationId`, returned `accounts.bindings[]`, and
-`accounts.runtimeBinding`. It also includes `accounts.oidcClient` when Accounts
-materialized an OIDC client during create. When the app declares a required
-`install-launch-token@v1` binding, `--runtime-base-url` is supplied, and the
-kernel deploy is marked ready, `install apply` issues an install-bootstrap
-launch token and returns `launch.url` for the app's
-`install.postInstallLaunchPath`. Pass `--launch-return-to /spaces/<id>/threads`
-when the post-install launch should create the app session and then open a
-specific in-app path such as the chat thread list.
+レスポンス kind は `takosumi-git.install-apply@v1` で、JSON レスポンスには
+`accounts.installationId`、`accounts.bindings[]`、`accounts.runtimeBinding`
+が含まれます。Accounts が create 時に OIDC client を materialize した場合は
+`accounts.oidcClient` も付きます。アプリが `install-launch-token@v1` binding を
+required で宣言し、`--runtime-base-url` が渡され、kernel deploy が ready
+になっている場合、`install apply` は install-bootstrap launch token を発行し、
+アプリの `install.postInstallLaunchPath` 向けに `launch.url` を返します。
+インストール後の起動でアプリの特定パス (チャットスレッド一覧など) を開きたい
+場合は `--launch-return-to /spaces/<id>/threads` を渡します。
 
 ## Apply
 
-Use apply after the source has a concrete commit pin:
+source の commit が確定したら apply を実行します。
 
 ```bash
 takosumi-git install \
@@ -135,11 +136,10 @@ takosumi-git install \
   --deploy-token "$TAKOSUMI_DEPLOY_TOKEN"
 ```
 
-For Git URL apply, pass the source and ref. takosumi-git checks out the ref,
-verifies that `.takosumi/app.yml` declares the same `source.git` and
-`source.ref`, resolves the concrete commit, and records that commit in the
-AppInstallation request. `install apply` remains as an explicit alias for the
-same default action:
+Git URL から apply するときは source と ref を渡します。takosumi-git は ref を
+checkout し、`.takosumi/app.yml` の `source.git` / `source.ref` と一致することを
+確認し、concrete commit を解決して AppInstallation リクエストに記録します。
+`install apply` は同じ動作の明示的なエイリアスです。
 
 ```bash
 takosumi-git install apply https://github.com/example/hello --ref v1.2.3
@@ -155,175 +155,183 @@ takosumi-git install https://github.com/example/hello \
   --cost-ack
 ```
 
-`install apply` posts to Takosumi Accounts:
+`install apply` は Takosumi Accounts にリクエストを送ります。
 
 ```text
 POST /v1/installations
 ```
 
-The request carries the AppInstallation source pin, `appManifestDigest`,
-`compiledManifestDigest` when `.takosumi/manifest.yml` is present, AppBinding
-records derived from `app.yml` binding declarations, namespace export grants
-resolved by Accounts / installer policy, and AppGrant records derived from
-`permissions.requested`. It also carries `confirm.previewId`,
-`confirm.permissionDigest`, and `confirm.costAck` approval evidence. If the
-preview includes metered provider bindings, `--cost-ack` is required before
-takosumi-git calls Accounts. If `--preview-id` or `--permission-digest` is
-provided, takosumi-git recomputes the preview and rejects stale approval
-evidence before the Accounts request. When `--runtime-base-url` (or
-`TAKOSUMI_RUNTIME_BASE_URL`) is supplied, `identity.oidc@v1` redirect paths are
-materialized into absolute redirect URIs and sent as an `oidcClients[]` request
-so Takosumi Accounts can create the per-installation OIDC client in the same
-ledger transaction.
+リクエストには次が含まれます:
 
-When `--launch-return-to` (or `TAKOSUMI_INSTALL_LAUNCH_RETURN_TO`) is supplied,
-takosumi-git adds that slash-prefixed path to the launch redirect URI as
-`return_to`. The installed app consumes the launch token at `/_takosumi/launch`,
-creates its session, strips the token from the browser URL, and redirects to
-that in-app path.
+- AppInstallation の source pin
+- `appManifestDigest`
+- `compiledManifestDigest` (`.takosumi/manifest.yml` がある場合)
+- `app.yml` の binding 宣言から導出した AppBinding レコード
+- Accounts / installer policy が解決した namespace export grant
+- `permissions.requested` から導出した AppGrant レコード
+- 承認エビデンス (`confirm.previewId` / `confirm.permissionDigest` /
+  `confirm.costAck`)
 
-`--mode` accepts `shared-cell`, `dedicated`, or `self-hosted`. When omitted,
-`install apply` uses the first value declared in `.takosumi/app.yml`
-`runtime.modes`; Takos-first apps should declare `shared-cell` first for the
-warm-pool install path.
+preview に metered provider binding が含まれる場合、Accounts を呼ぶ前に
+`--cost-ack` が必要です。`--preview-id` や `--permission-digest` を渡すと、
+takosumi-git は preview を再計算し、古い承認エビデンスは拒否します。
+`--runtime-base-url` (または `TAKOSUMI_RUNTIME_BASE_URL`) を渡すと、
+`identity.oidc@v1` の redirect path が絶対 URI に変換され、`oidcClients[]`
+として送られ、installation 単位の OIDC client が同じ ledger トランザクション内で
+作られます。
 
-If `--endpoint` (or `TAKOSUMI_ENDPOINT`) is supplied, `install apply` then posts
-the compiled manifest to the Takosumi kernel:
+`--launch-return-to` (または `TAKOSUMI_INSTALL_LAUNCH_RETURN_TO`) を渡すと、
+takosumi-git は launch redirect URI に `return_to` クエリとしてそのパスを
+追加します。インストールされたアプリは `/_takosumi/launch` で launch token を
+consume し、セッションを作り、ブラウザ URL からトークンを除去して、そのパスへ
+リダイレクトします。
+
+`--mode` には `shared-cell` / `dedicated` / `self-hosted` が指定できます。
+省略時は `.takosumi/app.yml` の `runtime.modes` の先頭値を使います。Takos
+ファーストのアプリは warm-pool install のために `shared-cell`
+を先頭に宣言します。
+
+`--endpoint` (または `TAKOSUMI_ENDPOINT`) を渡すと、`install apply` は compiled
+manifest を Takosumi kernel にも投下します。
 
 ```text
 POST /v1/deployments
 ```
 
-The kernel deploy step requires `--deploy-token` (or `TAKOSUMI_DEPLOY_TOKEN` /
-`TAKOSUMI_TOKEN`). The compiled manifest must already be a closed Shape manifest
-with installer-only placeholders resolved. A kernel HTTP 4xx/5xx response makes
-the CLI exit non-zero.
+kernel deploy 段階には `--deploy-token` (または `TAKOSUMI_DEPLOY_TOKEN` /
+`TAKOSUMI_TOKEN`) が必須です。compiled manifest は installer-only placeholder が
+解決済みの closed Shape manifest でなければなりません。kernel が HTTP 4xx/5xx を
+返した場合、CLI は非ゼロで終了します。
 
-After the kernel response, `install apply` calls Takosumi Accounts to transition
-the AppInstallation ledger:
+kernel のレスポンスを受け取った後、`install apply` は AppInstallation 台帳の
+ステータスを更新します。
 
 ```text
 PATCH /v1/installations/{installation-id}/status
 ```
 
-The status is `ready` after a successful kernel response and `failed` after a
-kernel HTTP 4xx/5xx response. The request includes a reason such as
-`kernel deploy HTTP 200` so the Accounts event hash chain can explain the
-transition.
+kernel が成功した場合は `ready`、4xx/5xx を返した場合は `failed` になります。
+リクエストには `kernel deploy HTTP 200` のような理由が含まれ、Accounts の event
+hash chain が状態遷移を説明できるようになります。
 
-AppBinding create requests sent by takosumi-git intentionally carry the approved
-declaration and a pending `configRef` value:
+takosumi-git が送る AppBinding create リクエストは、承認済み declaration と
+pending な `configRef` を一緒に運びます。
 
 ```text
 takosumi-git://installable-app/<app-id>/bindings/<name>/sha256:<digest>
 ```
 
-Those refs identify the approved binding declaration digest, while the attached
-declaration lets Takosumi Accounts hand the request to its provider
-materializer. Accounts may replace them in the create response with
-Accounts-owned refs such as `takosumi-accounts://.../oidc-client/<client-id>`,
-`takosumi-accounts://.../launch-token/<kid>`, or provider-backed refs for
-database, object-store, domain, and deploy-intent bindings without changing the
-original approval evidence.
+この ref は承認済み binding declaration の digest を識別し、添付された
+declaration を Takosumi Accounts が provider materializer に渡せるようにします。
+Accounts は create レスポンスで
+`takosumi-accounts://.../oidc-client/<client-id>`、
+`takosumi-accounts://.../launch-token/<kid>`、または database / object-store /
+domain / deploy-intent binding の provider-backed ref に置き換えます。承認
+エビデンス自体は変わりません。
 
-When `install apply` also deploys to a kernel endpoint, takosumi-git uses the
-Accounts create response (`binding_env`, OIDC client material, and
-`GET /v1/installations/{id}/launch-token` public config) to resolve explicit
-`${bindings.*}`, `${secrets.*}`, and `${installation.*}` placeholders, then
-inject missing default runtime environment values into compute resources before
-`POST /v1/deployments`. Materialized AppBinding refs stay in Accounts-owned
-config / secret records; they are not manifest placeholders. Explicit `env:`
-keys in the manifest win after their supported placeholders are resolved; only
-missing keys such as `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`,
-`OIDC_REDIRECT_URI`, `DATABASE_URL`, `BLOB_*`, `DEPLOY_INTENT_*`,
-`TAKOS_INSTALLATION_ID`, and `INSTALL_LAUNCH_*` are filled.
+`install apply` が kernel endpoint にも deploy する場合、takosumi-git は
+Accounts の create レスポンス (`binding_env`、OIDC
+client、`GET
+/v1/installations/{id}/launch-token` の public config) を使って
+`${bindings.*}` / `${secrets.*}` / `${installation.*}` placeholder
+を解決し、不足している default runtime env を compute resource に注入してから
+`POST /v1/deployments` に送ります。 materialize された AppBinding ref は
+Accounts-owned の config / secret record に 残り、manifest placeholder
+にはなりません。manifest 内の明示的な `env:` キーが optional
+解決後に優先され、`OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` / `OIDC_REDIRECT_URI`
+/ `DATABASE_URL` / `BLOB_*` / `DEPLOY_INTENT_*` / `TAKOS_INSTALLATION_ID` /
+`INSTALL_LAUNCH_*` のうち不足したキーだけが補完 されます。
 
-If a required provider-backed binding (`database.postgres@v1`,
-`object-store.s3-compatible@v1`, `domain.http@v1`, or `deploy-intent.gitops@v1`)
-still has its pending `takosumi-git://...` ref when a kernel deploy is
-requested, `install apply` fails before `POST /v1/deployments`. For bindings
-with default env, the required `binding_env` keys must also be present. Required
-`install-launch-token@v1` bindings likewise require an Accounts-owned
-launch-token ref plus all `INSTALL_LAUNCH_*` values from the public config
-endpoint before deploy.
+provider-backed binding (`database.postgres@v1` /
+`object-store.s3-compatible@v1` / `domain.http@v1` / `deploy-intent.gitops@v1`)
+が pending な `takosumi-git://...` ref のまま kernel deploy
+が要求された場合、`install apply` は `POST /v1/deployments`
+の前にエラーになります。default env を持つ binding では、 必要な `binding_env`
+キーもそろっている必要があります。`install-launch-token@v1` の required binding
+についても、Accounts-owned な launch-token ref と public config endpoint からの
+`INSTALL_LAUNCH_*` 値がデプロイ前にそろっている必要が あります。
 
 ## Namespace Exports
 
-Operator-owned dependencies are not service imports. OIDC, billing, dashboard,
-and Accounts lifecycle API access are resolved through namespace exports such as
-`operator.identity.oidc`, `operator.billing.default`, `operator.dashboard.web`,
-and `operator.platform.deploy`. takosumi-git may ask Takosumi Accounts to
-materialize the resulting OIDC client, launch token, grant, or billing/reporting
-contract. Kernel manifests remain Shape-only.
+operator-owned な依存関係は service import としては扱われません。OIDC、課金、
+dashboard、Accounts lifecycle API へのアクセスは namespace export
+(`operator.identity.oidc` / `operator.billing.default` /
+`operator.dashboard.web` / `operator.platform.deploy`) で解決します。
+takosumi-git は Takosumi Accounts に対して、対応する OIDC client / launch token
+/ grant / billing 契約の materialize を依頼します。kernel manifest は Shape
+だけを扱います。
 
-The kernel receives only the compiled Shape manifest; `.takosumi/app.yml` itself
-remains installer metadata.
+kernel が受け取るのは compiled Shape manifest だけで、`.takosumi/app.yml` は
+installer metadata のまま残ります。
 
-When `install apply` also deploys to a kernel endpoint, it resolves
-`resources[i].workflowRef` through the same v1 `TAKOSUMI_ARTIFACT=<uri>` stdout
-marker contract as `takosumi-git push`. The compiled manifest sent to
-`POST /v1/deployments` has `workflowRef` stripped, and any `spec.image` value
-must be digest-pinned as `<image>@sha256:<64-hex>`.
+`install apply` が kernel endpoint にも deploy
+する場合、`resources[i].workflowRef` は `takosumi-git push` と同じ
+`TAKOSUMI_ARTIFACT=<uri>` stdout marker contract
+で解決されます。`POST /v1/deployments` に送られる compiled manifest からは
+`workflowRef` が strip され、すべての `spec.image` は `<image>@sha256:<64-hex>`
+の digest 形式に pin されます。
 
-Install workflow steps run with a cleared process environment and a small
-non-secret allowlist. Operator runtime secrets such as `TAKOS_TOKEN`,
-`TAKOSUMI_DEPLOY_TOKEN`, `OIDC_CLIENT_SECRET`, and `DATABASE_URL` are not
-inherited by build steps. The installer uses the same build environment contract
-documented in [Artifact URI Contract](./artifact-contract.md).
-`workflowRef.file` must resolve to a relative path inside `.takosumi/workflows`;
-absolute paths, `../` escape, and symlink escape are rejected before any
-workflow step runs.
+install 用 workflow ステップはプロセス環境変数を clear し、機密でない小さな
+allowlist だけを残して実行されます。`TAKOS_TOKEN` / `TAKOSUMI_DEPLOY_TOKEN` /
+`OIDC_CLIENT_SECRET` / `DATABASE_URL` のような operator runtime secret は build
+step に継承されません。installer の build 環境は
+[Artifact URI Contract](./artifact-contract.md) の規約に従います。
+`workflowRef.file` は `.takosumi/workflows` 内の相対パスでなければならず、
+絶対パス・`../` での escape・symlink escape は workflow 実行前に拒否されます。
 
-## Installer Placeholders
+## Installer placeholders
 
-Compiled manifests must not carry installer-only placeholders.
-`takosumi-git install apply` resolves Accounts-backed `${bindings.*}`,
-`${secrets.*}`, and `${installation.*}` values after the Takosumi Accounts
-install API creates the AppInstallation record and before kernel deploy. If
-`.takosumi/manifest.yml` still contains `${params.*}`, `${installation.*}`,
-`${artifacts.*}`, `${bindings.*}`, `${secrets.*}`, or installer-only placeholder
-references after the deploy request build, `takosumi-git install apply` fails
-before `POST /v1/deployments`. `takosumi-git push` has no Accounts
-materialization phase, so it fails before deploy when those installer-only
-placeholders are present.
+compiled manifest に installer-only placeholder を残してはいけません。
 
-## Commit Pins
+`takosumi-git install apply` は Takosumi Accounts の install API が
+AppInstallation を作った後、kernel deploy の前に Accounts-backed な
+`${bindings.*}` / `${secrets.*}` / `${installation.*}` を解決します。deploy
+request build 後も `${params.*}` / `${installation.*}` / `${artifacts.*}` /
+`${bindings.*}` / `${secrets.*}` や installer-only placeholder
+が残っている場合、 `takosumi-git install apply` は `POST /v1/deployments`
+の前にエラーになります。 `takosumi-git push` は Accounts materialization
+のフェーズを持たないため、 installer-only placeholder が残っていれば deploy
+の前にエラーになります。
 
-`source.commit` in `.takosumi/app.yml` is accepted when present. When the commit
-was resolved externally, pass it with `--source-commit`. If neither
-`source.commit`, `--source-commit`, nor a full-SHA `source.ref` is available,
-`install apply` refuses to create the AppInstallation.
+## Commit Pin
 
-This keeps the ledger explainable: the app manifest digest, compiled manifest
-digest, git ref, and concrete source commit are recorded before the optional
-runtime deployment step.
+`.takosumi/app.yml` に `source.commit` があればそれを使います。外部で commit を
+解決済みの場合は `--source-commit` で渡します。`source.commit` /
+`--source-commit` / full SHA な `source.ref`
+のいずれも与えられない場合、`install apply` は AppInstallation
+の作成を拒否します。
 
-## Upgrade and Rollback
+これにより、app manifest digest / compiled manifest digest / git ref / concrete
+commit が runtime deploy の前に必ず記録され、台帳から「何を install したか」を
+後から説明できるようになります。
 
-`takosumi-git upgrade` and `takosumi-git rollback` reuse the same Git URL
-preview path and then post a source revision to Takosumi Accounts when `--apply`
-is present:
+## Upgrade / Rollback
+
+`takosumi-git upgrade` と `takosumi-git rollback` は同じ Git URL preview の
+パスを再利用し、`--apply` を指定したときに Takosumi Accounts に source revision
+を送ります。
 
 ```bash
 takosumi-git upgrade inst_01J... --ref v1.2.4 --accounts-url http://127.0.0.1:8787
 takosumi-git rollback inst_01J... --to v1.2.3 --accounts-url http://127.0.0.1:8787 --apply
 ```
 
-Without `--apply`, both commands are non-mutating. The preview compares the
-current AppInstallation source pin with the next `.takosumi/app.yml` metadata,
-shows manifest digest changes, permission diff, binding diff, and a small
-migration plan. With `--apply`, the CLI calls:
+`--apply` を指定しない場合、どちらも副作用なしで動作します。preview は現在の
+AppInstallation source pin と次の `.takosumi/app.yml` を比較し、manifest digest
+の変化、permission diff、binding diff、migration plan を表示します。`--apply`
+を指定すると、CLI は次のエンドポイントを呼びます。
 
 ```text
 POST /v1/installations/{installation-id}/upgrade
 POST /v1/installations/{installation-id}/rollback
 ```
 
-Takosumi Accounts updates the AppInstallation source pin and appends an
-`installation.upgraded` or `installation.rolled_back` event to the hash chain.
+Takosumi Accounts は AppInstallation の source pin を更新し、
+`installation.upgraded` または `installation.rolled_back` イベントを hash chain
+に追加します。
 
-When running `takosumi-git serve`, the same revision flow is available behind
-HTTP for product UIs and operator tools:
+`takosumi-git serve` を起動すると、同じ revision フローを product UI や operator
+ツール向けに HTTP で公開できます。
 
 ```text
 POST /v1/install/revision/preview
@@ -331,25 +339,25 @@ POST /v1/install/revision/apply
 Authorization: Bearer <serve-token>
 ```
 
-The request body uses `"operation": "upgrade"` with `"ref": "v1.2.4"`, or
-`"operation": "rollback"` with `"to": "v1.2.3"`. The response kinds are
-`takosumi-git.install-revision-preview@v1` and
-`takosumi-git.install-revision-apply@v1`.
+リクエスト body は upgrade で `"operation": "upgrade"` と `"ref": "v1.2.4"`、
+rollback で `"operation": "rollback"` と `"to": "v1.2.3"` を渡します。レスポンス
+kind は `takosumi-git.install-revision-preview@v1` /
+`takosumi-git.install-revision-apply@v1` です。
 
-## Materialize and export
+## Materialize / export / import
 
-`takosumi-git materialize`, `takosumi-git export`, and `takosumi-git import` are
-thin clients for the Takosumi Accounts lifecycle API. Materialize/export request
-the operation and return the operation tracking URL; provider workers complete
-the runtime move or bundle creation asynchronously. When an export response is
-not complete yet, `takosumi-git export --output` follows the operation endpoint
-until it returns `downloadUrl`, then downloads that bundle to disk. Import reads
-a JSON AppInstallation export bundle, a `tar.zst` archive containing
-`takos-export/bundle.json`, or an age-wrapped `tar.zst.age` archive when
-`--identity` is supplied, and creates the target AppInstallation through
-Accounts. Archive data entries are metadata-only by default; pass
-`--restore-data` only when the target Accounts instance has an import data
-restorer configured.
+`takosumi-git materialize` / `export` / `import` は Takosumi Accounts の
+lifecycle API に対する thin client です。materialize と export
+はオペレーションを 要求し、tracking URL を返します。runtime の移動や bundle
+生成は provider worker が非同期に完了させます。export がまだ完了していないとき
+`takosumi-git export
+--output` は `downloadUrl` が返るまで operation endpoint を
+polling し、bundle をディスクに保存します。import は JSON 形式の AppInstallation
+export bundle、 `takos-export/bundle.json` を含む `tar.zst` アーカイブ、または
+`--identity` を 渡したときは age で wrap した `tar.zst.age`
+アーカイブを読み、Accounts 経由で target AppInstallation を作成します。data
+entry は既定で metadata のみで、 `--restore-data` は target Accounts に import
+data restorer が構成されている ときだけ指定します。
 
 ```bash
 takosumi-git materialize inst_01J... \
@@ -382,7 +390,7 @@ takosumi-git import ./takos-export.tar.zst.age \
 Authentik / Auth0 などの upstream IdP URL を直接 app issuer として渡す option
 では ありません。
 
-The CLI posts:
+CLI が送るエンドポイント:
 
 ```text
 POST /v1/installations/{installation-id}/materialize
@@ -390,9 +398,35 @@ POST /v1/installations/{installation-id}/export
 POST /v1/installations/import
 ```
 
-Materialize and export send an `Idempotency-Key` header. Pass
-`--idempotency-key` to reuse a known key across retries. Import accepts the same
-header for future-compatible retries. Archive import reads the canonical
-`takosumi.accounts.installation-export-bundle@v1` payload from
-`takos-export/bundle.json` inside the `tar.zst`; `.tar.zst.age` inputs are
-decrypted with `age -d -i <identity>` before the same archive read.
+materialize と export は `Idempotency-Key` ヘッダを送ります。retry で同じキーを
+使い回すときは `--idempotency-key` で指定します。import も将来の retry のために
+同じヘッダを受け付けます。archive import は `tar.zst` 内の
+`takos-export/bundle.json` から
+`takosumi.accounts.installation-export-bundle@v1` payload を読みます。
+`.tar.zst.age` は `age -d -i <identity>` で復号した上で同じ archive を読みます。
+
+## Implementation drift anchors
+
+```text
+digest-pinned as `<image>@sha256:<64-hex>`
+cleared process environment
+relative path inside `.takosumi/workflows`
+A kernel HTTP 4xx/5xx response makes
+non-zero
+Preview is non-mutating
+Compiled manifests must not carry installer-only placeholders
+parseInstallableAppYaml
+buildInstallPreview
+applyInstall
+appBindingCreateRequests
+compileInstallManifest
+compileInstallWorkflowRefs
+resolveWorkflowFilePath
+assertNoInstallerPlaceholders
+unresolved installer placeholder
+checkoutGitSource
+sourceGitUrl
+source.commit is required for install apply
+patchInstallationStatus
+sourceCommit
+```
