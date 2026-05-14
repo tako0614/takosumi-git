@@ -324,18 +324,22 @@ const KERNEL_ALLOWED_MANIFEST_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 function stripUnknownManifestKeys(request: DeployRequest): DeployRequest {
-  const manifest = request.manifest as unknown as Record<string, unknown>;
-  let hasUnknown = false;
-  for (const key of Object.keys(manifest)) {
-    if (!KERNEL_ALLOWED_MANIFEST_KEYS.has(key)) {
-      hasUnknown = true;
-      break;
-    }
-  }
+  const manifest = request.manifest;
+  const hasUnknown = Object.keys(manifest).some(
+    (key) => !KERNEL_ALLOWED_MANIFEST_KEYS.has(key),
+  );
   if (!hasUnknown) return request;
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(manifest)) {
-    if (KERNEL_ALLOWED_MANIFEST_KEYS.has(key)) cleaned[key] = value;
-  }
-  return { ...request, manifest: cleaned as unknown as ManifestEnvelope };
+  // Rebuild the envelope from typed fields. The discriminators come from the
+  // already-typed input, so no `as unknown as ManifestEnvelope` laundering is
+  // needed to land back in the contract type.
+  const cleaned: ManifestEnvelope = {
+    apiVersion: manifest.apiVersion,
+    kind: manifest.kind,
+    ...(manifest["@context"] !== undefined &&
+      { "@context": manifest["@context"] }),
+    ...(manifest.namespace !== undefined && { namespace: manifest.namespace }),
+    ...(manifest.metadata !== undefined && { metadata: manifest.metadata }),
+    ...(manifest.resources !== undefined && { resources: manifest.resources }),
+  };
+  return { ...request, manifest: cleaned };
 }
