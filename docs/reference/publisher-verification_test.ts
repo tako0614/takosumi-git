@@ -5,7 +5,11 @@ const root = new URL("../../", import.meta.url);
 Deno.test("publisher verification minimum spec matches preview vocabulary", async () => {
   const spec = await read("docs/reference/publisher-verification.md");
   const appSpec = await read("docs/reference/app-yml-spec.md");
-  const installSource = await read("packages/cli/src/install.ts");
+  const installSource = [
+    await read("packages/cli/src/install.ts"),
+    await read("packages/cli/src/install-parse.ts"),
+    await read("packages/cli/src/install-preview.ts"),
+  ].join("\n");
 
   for (
     const snippet of [
