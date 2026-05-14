@@ -45,6 +45,30 @@ import {
   compileInstallWorkflowRefs,
   installerPlaceholderGlobalPattern,
 } from "./install-compile.ts";
+import {
+  type AccountsInstallResponseSummary,
+  InstallApplyError,
+} from "./install-apply-types.ts";
+import {
+  absoluteUrl,
+  bindingRecordForName,
+  hasEnvKey,
+  hasNonEmptyEnvKey,
+  isProviderBackedBinding,
+  normalizeBaseUrl,
+  numberProperty,
+  readResponseBody,
+  stringArrayProperty,
+  stringFromUnknown,
+  stringProperty,
+  stringRecordProperty,
+} from "./install-apply-helpers.ts";
+
+export {
+  type AccountsInstallResponseSummary,
+  InstallApplyError,
+} from "./install-apply-types.ts";
+export { stringProperty } from "./install-apply-helpers.ts";
 
 export interface InstallOidcClientCreateRequest {
   readonly binding: string;
@@ -278,16 +302,6 @@ export interface InstallApplyResult {
     readonly body: unknown;
   };
   readonly launch?: Record<string, unknown>;
-}
-
-export interface AccountsInstallResponseSummary {
-  readonly installationId?: string;
-  readonly runtimeBinding?: Record<string, unknown>;
-  readonly bindings: readonly Record<string, unknown>[];
-  readonly oidcClient?: Record<string, unknown>;
-  readonly oidcClientSecret?: string;
-  readonly bindingEnv?: Record<string, string>;
-  readonly launchTokenConfig?: Record<string, unknown>;
 }
 
 function appBindingCreateRequests(
@@ -783,13 +797,6 @@ function assertRequiredProviderBindingsMaterialized(
   }
 }
 
-function isProviderBackedBinding(type: InstallableAppBindingType): boolean {
-  return type === "database.postgres@v1" ||
-    type === "object-store.s3-compatible@v1" ||
-    type === "domain.http@v1" ||
-    type === "deploy-intent.gitops@v1";
-}
-
 function requiredBindingEnvKeys(
   type: InstallableAppBindingType,
 ): readonly string[] {
@@ -1190,15 +1197,6 @@ function postgresPlaceholderValues(
   }
 }
 
-function bindingRecordForName(
-  accounts: AccountsInstallResponseSummary,
-  name: string,
-): Record<string, unknown> | undefined {
-  return accounts.bindings.find((entry) =>
-    stringProperty(entry, "name", "name") === name
-  );
-}
-
 function indexedValues(
   prefix: string,
   values: readonly unknown[],
@@ -1331,53 +1329,11 @@ function injectMissingEnv(
   target.env = env;
 }
 
-function hasEnvKey(env: Record<string, unknown>, key: string): boolean {
-  const normalized = key.toUpperCase();
-  return Object.keys(env).some((existing) =>
-    existing.toUpperCase() === normalized
-  );
-}
-
-function hasNonEmptyEnvKey(env: Record<string, unknown>, key: string): boolean {
-  const normalized = key.toUpperCase();
-  return Object.entries(env).some(([existing, value]) =>
-    existing.toUpperCase() === normalized &&
-    typeof value === "string" &&
-    value.length > 0
-  );
-}
-
 function launchTokenConfigEnv(
   accounts: AccountsInstallResponseSummary,
 ): Record<string, unknown> {
   const launchConfig = accounts.launchTokenConfig;
   return launchConfig && isRecord(launchConfig.env) ? launchConfig.env : {};
-}
-
-export class InstallApplyError extends Error {
-  constructor(readonly status: number, readonly body: unknown) {
-    super(`Takosumi Accounts returned HTTP ${status}`);
-    this.name = "InstallApplyError";
-  }
-}
-
-function normalizeBaseUrl(url: string): string {
-  return url.replace(/\/+$/, "");
-}
-
-function absoluteUrl(baseUrl: string, path: string): string {
-  const base = `${normalizeBaseUrl(baseUrl)}/`;
-  return new URL(path.replace(/^\/+/, ""), base).toString();
-}
-
-async function readResponseBody(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (!text) return undefined;
-  try {
-    return JSON.parse(text);
-  } catch {
-    return text;
-  }
 }
 
 export function readAccountsInstallResponse(
@@ -1429,54 +1385,4 @@ function readInstallationId(body: unknown): string | undefined {
     : typeof installation.installation_id === "string"
     ? installation.installation_id
     : undefined;
-}
-
-export function stringProperty(
-  record: Record<string, unknown>,
-  snakeKey: string,
-  camelKey: string,
-): string | undefined {
-  const value = record[snakeKey] ?? record[camelKey];
-  return stringFromUnknown(value);
-}
-
-function stringFromUnknown(value: unknown): string | undefined {
-  return typeof value === "string" && value.length > 0 ? value : undefined;
-}
-
-function numberProperty(
-  record: Record<string, unknown>,
-  snakeKey: string,
-  camelKey: string,
-): number | undefined {
-  const value = record[snakeKey] ?? record[camelKey];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  return undefined;
-}
-
-function stringArrayProperty(
-  record: Record<string, unknown>,
-  snakeKey: string,
-  camelKey: string,
-): readonly string[] {
-  const value = record[snakeKey] ?? record[camelKey];
-  return Array.isArray(value)
-    ? value.filter((entry): entry is string =>
-      typeof entry === "string" && entry.length > 0
-    )
-    : [];
-}
-
-function stringRecordProperty(
-  record: Record<string, unknown>,
-  snakeKey: string,
-  camelKey: string,
-): Record<string, string> | undefined {
-  const value = record[snakeKey] ?? record[camelKey];
-  if (!isRecord(value)) return undefined;
-  const output: Record<string, string> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === "string" && entry.length > 0) output[key] = entry;
-  }
-  return Object.keys(output).length > 0 ? output : undefined;
 }
