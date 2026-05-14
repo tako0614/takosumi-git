@@ -3,11 +3,11 @@
  *
  * Dispatches `takosumi-git install [preview|apply]` to the appropriate flow
  * and renders the human / JSON output. Behavior, types, and helpers live in
- * the cooperating `install-*.ts` modules and are re-exported here so that
- * existing `from "./install.ts"` imports keep working.
+ * the cooperating `install-*.ts` modules; this file is the command-level
+ * install barrel used by the CLI and serve handlers.
  */
 
-import { InstallableAppValidationError, isRecord } from "./install-parse.ts";
+import { InstallableAppValidationError } from "./install-parse.ts";
 import {
   INSTALL_HELP_TEXT,
   InstallHelpRequested,
@@ -161,6 +161,3 @@ function renderRuntimeBindingSummary(
   if (!targetType && !targetId) return undefined;
   return [targetType, targetId].filter(Boolean).join(" ");
 }
-
-// Re-export to satisfy backward-compatible imports of legacy helpers.
-export { isRecord };
