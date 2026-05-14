@@ -12,6 +12,12 @@
 
 export type DeployMode = "apply" | "plan" | "destroy";
 
+/**
+ * JSON-LD @context value as accepted by the kernel
+ * (`validateManifestJsonLdContext` in `@takos/takosumi-contract`).
+ * The kernel allows a non-empty string, a context object, or a non-empty
+ * array whose entries are themselves strings or context objects.
+ */
 export type ManifestJsonLdContext =
   | string
   | Record<string, unknown>
@@ -40,15 +46,17 @@ export interface ManifestEnvelope {
  * asserts the envelope shape so downstream code can drop
  * `as unknown as ManifestEnvelope` casts.
  *
- * `@context` is validated structurally here so misformatted JSON-LD context
- * fails fast on the client instead of round-tripping through the kernel.
- * The kernel's `validateManifestJsonLdContext` enforces the same rule on the
- * receiving end (string OR object OR non-empty array of those).
+ * `@context` is validated structurally here so a misformatted JSON-LD context
+ * fails fast on the client instead of round-tripping a kernel reject. The
+ * accepted shapes mirror the kernel's `validateManifestJsonLdContext`:
+ * non-empty string, JSON-LD context object, or non-empty array of those.
  *
  * Note: `template` is intentionally NOT a recognized envelope key. The kernel
  * `ManifestEnvelope` (`@takos/takosumi-contract`) rejects unknown top-level
- * keys; any client-side substitution `template:` field must be resolved
- * and stripped before `postDeployment` is called.
+ * keys via `validateManifestEnvelope`; any client-side substitution
+ * `template:` field is a takosumi-git private extension that must be resolved
+ * and stripped before `postDeployment` is called. `postDeployment` also
+ * defends-in-depth by stripping unknown top-level keys on the wire.
  */
 export function parseManifestEnvelope(
   value: Record<string, unknown>,

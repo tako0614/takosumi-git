@@ -221,7 +221,7 @@ Deno.test("parseManifestEnvelope accepts a string @context", () => {
   );
 });
 
-Deno.test("parseManifestEnvelope accepts an array @context", () => {
+Deno.test("parseManifestEnvelope accepts an array @context with mixed entries", () => {
   const envelope = parseManifestEnvelope({
     "@context": [
       "https://takosumi.com/contexts/manifest-v1.jsonld",
@@ -231,6 +231,19 @@ Deno.test("parseManifestEnvelope accepts an array @context", () => {
     kind: "Manifest",
   });
   assert.ok(Array.isArray(envelope["@context"]));
+});
+
+Deno.test("parseManifestEnvelope accepts an object @context", () => {
+  const envelope = parseManifestEnvelope({
+    "@context": { "@vocab": "https://takos.jp/ns#" },
+    apiVersion: "1.0",
+    kind: "Manifest",
+  });
+  assert.ok(
+    envelope["@context"] !== undefined &&
+      !Array.isArray(envelope["@context"]) &&
+      typeof envelope["@context"] === "object",
+  );
 });
 
 Deno.test("parseManifestEnvelope rejects empty string @context", () => {
