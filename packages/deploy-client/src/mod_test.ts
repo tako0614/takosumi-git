@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { type DeployRequest, postDeployment } from "./mod.ts";
+import {
+  type DeployRequest,
+  parseManifestEnvelope,
+  postDeployment,
+} from "./mod.ts";
 
 const request: DeployRequest = {
   mode: "apply",
@@ -141,6 +145,140 @@ Deno.test("postDeployment does not retry non-transient 409 responses", async () 
   assert.equal(response.status, 409);
   assert.equal(response.attempts, 1);
   assert.equal(calls, 1);
+});
+
+Deno.test("postDeployment strips unknown top-level manifest keys (template) before submit", async () => {
+  const captured: Array<{ body: Record<string, unknown> }> = [];
+  // Cast required because `template` is intentionally not in the
+  // ManifestEnvelope public type, but legacy callers may still pass it.
+  const dirtyManifest = {
+    apiVersion: "1.0",
+    kind: "Manifest",
+    metadata: { name: "app" },
+    template: { template: "legacy", inputs: { a: 1 } },
+    resources: [],
+  } as unknown as DeployRequest["manifest"];
+  const response = await postDeployment(
+    {
+      endpoint: "https://kernel.example.com",
+      token: "token-1",
+      idempotencyKey: "idem-strip",
+      retry: false,
+      fetch: ((_input, init) => {
+        const raw = (init as { body?: BodyInit | null } | undefined)?.body ??
+          "";
+        captured.push({ body: JSON.parse(String(raw)) });
+        return Promise.resolve(new Response("{}", { status: 202 }));
+      }) as typeof fetch,
+    },
+    { mode: "apply", manifest: dirtyManifest },
+  );
+
+  assert.equal(response.status, 202);
+  assert.equal(captured.length, 1);
+  const sentManifest = captured[0].body.manifest as Record<string, unknown>;
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(sentManifest, "template"),
+    false,
+    "template must be stripped from the wire manifest",
+  );
+  // Preserved fields are still present.
+  assert.equal(sentManifest.apiVersion, "1.0");
+  assert.equal(sentManifest.kind, "Manifest");
+  assert.deepEqual(sentManifest.metadata, { name: "app" });
+  assert.deepEqual(sentManifest.resources, []);
+});
+
+Deno.test("postDeployment preserves the request identity when the manifest is clean", async () => {
+  const captured: Array<{ body: Record<string, unknown> }> = [];
+  await postDeployment(
+    {
+      endpoint: "https://kernel.example.com",
+      token: "token-1",
+      idempotencyKey: "idem-clean",
+      retry: false,
+      fetch: ((_input, init) => {
+        const raw = (init as { body?: BodyInit | null } | undefined)?.body ??
+          "";
+        captured.push({ body: JSON.parse(String(raw)) });
+        return Promise.resolve(new Response("{}", { status: 202 }));
+      }) as typeof fetch,
+    },
+    request,
+  );
+  assert.deepEqual(captured[0].body, request);
+});
+
+Deno.test("parseManifestEnvelope accepts a string @context", () => {
+  const envelope = parseManifestEnvelope({
+    "@context": "https://takosumi.com/contexts/manifest-v1.jsonld",
+    apiVersion: "1.0",
+    kind: "Manifest",
+  });
+  assert.equal(
+    envelope["@context"],
+    "https://takosumi.com/contexts/manifest-v1.jsonld",
+  );
+});
+
+Deno.test("parseManifestEnvelope accepts an array @context", () => {
+  const envelope = parseManifestEnvelope({
+    "@context": [
+      "https://takosumi.com/contexts/manifest-v1.jsonld",
+      { takos: "https://takos.jp/ns#" },
+    ],
+    apiVersion: "1.0",
+    kind: "Manifest",
+  });
+  assert.ok(Array.isArray(envelope["@context"]));
+});
+
+Deno.test("parseManifestEnvelope rejects empty string @context", () => {
+  assert.throws(
+    () =>
+      parseManifestEnvelope({
+        "@context": "",
+        apiVersion: "1.0",
+        kind: "Manifest",
+      }),
+    /@context.*non-empty/,
+  );
+});
+
+Deno.test("parseManifestEnvelope rejects empty array @context", () => {
+  assert.throws(
+    () =>
+      parseManifestEnvelope({
+        "@context": [],
+        apiVersion: "1.0",
+        kind: "Manifest",
+      }),
+    /@context.*non-empty/,
+  );
+});
+
+Deno.test("parseManifestEnvelope rejects array @context with non-string non-object entry", () => {
+  assert.throws(
+    () =>
+      parseManifestEnvelope({
+        "@context": ["ok", 42 as unknown as string],
+        apiVersion: "1.0",
+        kind: "Manifest",
+      }),
+    /@context"\]\[1\]/,
+  );
+});
+
+Deno.test("parseManifestEnvelope rejects non-string non-object scalar @context", () => {
+  assert.throws(
+    () =>
+      parseManifestEnvelope({
+        "@context": 42 as unknown as string,
+        apiVersion: "1.0",
+        kind: "Manifest",
+      }),
+    /@context/,
+  );
 });
 
 Deno.test("postDeployment surfaces the final network error", async () => {

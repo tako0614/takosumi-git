@@ -12,15 +12,17 @@
 
 export type DeployMode = "apply" | "plan" | "destroy";
 
+export type ManifestJsonLdContext =
+  | string
+  | Record<string, unknown>
+  | ReadonlyArray<string | Record<string, unknown>>;
+
 export interface ManifestEnvelope {
+  readonly "@context"?: ManifestJsonLdContext;
   readonly apiVersion: "1.0";
   readonly kind: "Manifest";
   readonly namespace?: string;
   readonly metadata?: { name?: string; labels?: Record<string, string> };
-  readonly template?: {
-    readonly template: string;
-    readonly inputs?: Record<string, unknown>;
-  };
   readonly resources?: ReadonlyArray<{
     readonly shape: string;
     readonly name: string;
@@ -33,10 +35,20 @@ export interface ManifestEnvelope {
 
 /**
  * Walk a parsed-YAML value, assert the manifest discriminators, and return
- * a typed `ManifestEnvelope`. Sub-trees (metadata, template, resources) are
- * passed through to the kernel which owns deeper validation; this parser
- * only asserts the envelope shape so downstream code can drop
+ * a typed `ManifestEnvelope`. Sub-trees (metadata, resources) are passed
+ * through to the kernel which owns deeper validation; this parser only
+ * asserts the envelope shape so downstream code can drop
  * `as unknown as ManifestEnvelope` casts.
+ *
+ * `@context` is validated structurally here so misformatted JSON-LD context
+ * fails fast on the client instead of round-tripping through the kernel.
+ * The kernel's `validateManifestJsonLdContext` enforces the same rule on the
+ * receiving end (string OR object OR non-empty array of those).
+ *
+ * Note: `template` is intentionally NOT a recognized envelope key. The kernel
+ * `ManifestEnvelope` (`@takos/takosumi-contract`) rejects unknown top-level
+ * keys; any client-side substitution `template:` field must be resolved
+ * and stripped before `postDeployment` is called.
  */
 export function parseManifestEnvelope(
   value: Record<string, unknown>,
@@ -49,6 +61,12 @@ export function parseManifestEnvelope(
     throw new Error(`${label}.kind must be "Manifest"`);
   }
   const envelope: ManifestEnvelope = { apiVersion: "1.0", kind: "Manifest" };
+  if (value["@context"] !== undefined) {
+    assertJsonLdContext(value["@context"], label);
+    Object.assign(envelope, {
+      "@context": value["@context"] as ManifestJsonLdContext,
+    });
+  }
   if (typeof value.namespace === "string") {
     Object.assign(envelope, { namespace: value.namespace });
   }
@@ -60,20 +78,50 @@ export function parseManifestEnvelope(
       metadata: value.metadata as ManifestEnvelope["metadata"],
     });
   }
-  if (
-    value.template !== undefined && typeof value.template === "object" &&
-    value.template !== null && !Array.isArray(value.template)
-  ) {
-    Object.assign(envelope, {
-      template: value.template as ManifestEnvelope["template"],
-    });
-  }
   if (Array.isArray(value.resources)) {
     Object.assign(envelope, {
       resources: value.resources as ManifestEnvelope["resources"],
     });
   }
   return envelope;
+}
+
+function assertJsonLdContext(value: unknown, label: string): void {
+  if (typeof value === "string") {
+    if (value.length === 0) {
+      throw new Error(`${label}["@context"] string must be non-empty`);
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      throw new Error(`${label}["@context"] array must be non-empty`);
+    }
+    value.forEach((entry, index) => {
+      if (typeof entry === "string") {
+        if (entry.length === 0) {
+          throw new Error(
+            `${label}["@context"][${index}] string entry must be non-empty`,
+          );
+        }
+        return;
+      }
+      if (!isPlainObject(entry)) {
+        throw new Error(
+          `${label}["@context"][${index}] must be a non-empty string or JSON-LD context object`,
+        );
+      }
+    });
+    return;
+  }
+  if (isPlainObject(value)) return;
+  throw new Error(
+    `${label}["@context"] must be a non-empty string, JSON-LD context object, or non-empty array of those values`,
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export interface DeployRequest {
@@ -165,6 +213,7 @@ export async function postDeployment(
   const url = new URL("/v1/deployments", options.endpoint).toString();
   const idempotencyKey = options.idempotencyKey ?? newIdempotencyKey();
   const retry = normalizeRetry(options.retry);
+  const wireRequest = stripUnknownManifestKeys(request);
   const requestInit: RequestInit = {
     method: "POST",
     headers: {
@@ -172,7 +221,7 @@ export async function postDeployment(
       "authorization": `Bearer ${options.token}`,
       "x-idempotency-key": idempotencyKey,
     },
-    body: JSON.stringify(request),
+    body: JSON.stringify(wireRequest),
   };
 
   let lastError: unknown;
@@ -244,4 +293,41 @@ function defaultSleep(delayMs: number): Promise<void> {
 
 function newIdempotencyKey(): string {
   return `takosumi-git-${crypto.randomUUID()}`;
+}
+
+/**
+ * Allowed top-level manifest envelope keys per `@takos/takosumi-contract`
+ * `validateManifestEnvelope`. Any other top-level key (notably a stray
+ * client-side `template:` substitution block) is stripped before the
+ * manifest is serialized so we never round-trip an "unknown field" reject
+ * from the kernel.
+ *
+ * Resource-level extensions (e.g. `workflowRef`) are the responsibility of
+ * the caller; the CLI `push` command resolves and strips those before
+ * passing the manifest to `postDeployment`.
+ */
+const KERNEL_ALLOWED_MANIFEST_KEYS: ReadonlySet<string> = new Set([
+  "@context",
+  "apiVersion",
+  "kind",
+  "namespace",
+  "metadata",
+  "resources",
+]);
+
+function stripUnknownManifestKeys(request: DeployRequest): DeployRequest {
+  const manifest = request.manifest as unknown as Record<string, unknown>;
+  let hasUnknown = false;
+  for (const key of Object.keys(manifest)) {
+    if (!KERNEL_ALLOWED_MANIFEST_KEYS.has(key)) {
+      hasUnknown = true;
+      break;
+    }
+  }
+  if (!hasUnknown) return request;
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(manifest)) {
+    if (KERNEL_ALLOWED_MANIFEST_KEYS.has(key)) cleaned[key] = value;
+  }
+  return { ...request, manifest: cleaned as unknown as ManifestEnvelope };
 }
