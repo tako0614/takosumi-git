@@ -1,25 +1,14 @@
 # takosumi-git
 
-`takosumi-git` は [`takosumi`](https://github.com/tako0614/takosumi) の姉妹
-プロダクトで、Git リポジトリと takosumi
-マニフェストデプロイエンジンを橋渡しします。
+`takosumi-git` は **Git push から Takosumi kernel への deploy までを 1 コマンド
+で繋ぐ installer** です。`.takosumi/` 配下のワークフローを実行してアーティファ
+クト URI を解決し、コンパイル済みマニフェストを `POST /v1/deployments` で投下し
+ます。
 
-## 機能概要
-
-1. Git リポジトリ (push / PR / tag) を監視するか、webhook イベントを受け取る
-2. `.takosumi/workflows/` 配下のビルドパイプライン (image build, artifact
-   upload) を実行する
-3. アーティファクト URI を解決し、`Manifest` ドキュメントを生成する
-4. マニフェストと opaque なデプロイプロベナンスを takosumi カーネルに
-   `POST /v1/deployments` で送信する
-5. マニフェストの Git 履歴をバージョン履歴の正本として扱う
-
-takosumi カーネル自体は純粋なマニフェストデプロイエンジンであり、ワークフロー
-定義の解釈、スケジューリング、Git セマンティクスの解釈は行いません。
-`takosumi-git` は opaque な `takosumi-git.deployment-provenance@v1` JSON
-チェーンを添付し、どのワークフロー実行 / Git コミット / アーティファクト URI /
-ステップログダイジェストからマニフェストが生まれたかをカーネルの WAL
-に記録できます。
+[`takosumi`](https://github.com/tako0614/takosumi) カーネル本体は純粋なマニフェ
+ストデプロイエンジンで、Git・ワークフロー・プロジェクトレイアウトの解釈は持ち
+ません。`takosumi-git` はその上で Git URL install / `.takosumi/` convention を
+提供する canonical installer であり、raw deploy では数ある client の 1 つです。
 
 ## Quick start
 
@@ -36,7 +25,31 @@ takosumi-git push --endpoint $TAKOSUMI_ENDPOINT --token $TAKOSUMI_TOKEN
 ファイルレイアウトについての意見は持ちません。完全な convention は
 [AGENTS.md](./AGENTS.md) を参照してください。
 
-## 機能
+## Docs
+
+- [Quickstart](./docs/quickstart.md)
+- [WorkflowRef](./docs/workflow-ref.md)
+- [Artifact URI Contract](./docs/artifact-contract.md)
+- [Install Preview and Apply](./docs/install.md)
+- [History](./docs/history.md)
+- [Serve](./docs/serve.md)
+
+## 実行モデル
+
+1. Git リポジトリ (push / PR / tag) を監視するか、webhook イベントを受け取る
+2. `.takosumi/workflows/` 配下のビルドパイプライン (image build, artifact
+   upload) を実行する
+3. アーティファクト URI を解決し、`Manifest` ドキュメントを生成する
+4. マニフェストと opaque なデプロイプロベナンスを takosumi カーネルに
+   `POST /v1/deployments` で送信する
+5. マニフェストの Git 履歴をバージョン履歴の正本として扱う
+
+`takosumi-git` は opaque な `takosumi-git.deployment-provenance@v1` JSON
+チェーンを添付し、どのワークフロー実行 / Git コミット / アーティファクト URI /
+ステップログダイジェストからマニフェストが生まれたかをカーネルの WAL
+に記録できます。
+
+## CLI コマンド
 
 `takosumi-git init`、`push`、`install`、`import`、`upgrade`、`rollback`、
 `materialize`、`export`、`serve`、`history` を実装しています。
@@ -70,15 +83,6 @@ takosumi-git push --endpoint $TAKOSUMI_ENDPOINT --token $TAKOSUMI_TOKEN
 
 詳細なパッケージレイアウトと設計境界は [AGENTS.md](./AGENTS.md)
 を参照してください。
-
-## Docs
-
-- [Quickstart](./docs/quickstart.md)
-- [WorkflowRef](./docs/workflow-ref.md)
-- [Artifact URI Contract](./docs/artifact-contract.md)
-- [Install Preview and Apply](./docs/install.md)
-- [History](./docs/history.md)
-- [Serve](./docs/serve.md)
 
 ## リリース
 
