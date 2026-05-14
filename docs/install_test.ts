@@ -4,7 +4,12 @@ const root = new URL("../", import.meta.url);
 
 Deno.test("install docs cover preview, apply, and commit pins", async () => {
   const doc = await read("docs/install.md");
-  const installSource = await read("packages/cli/src/install.ts");
+  const installSource = [
+    await read("packages/cli/src/install.ts"),
+    await read("packages/cli/src/install-parse.ts"),
+    await read("packages/cli/src/install-preview.ts"),
+    await read("packages/cli/src/install-compile.ts"),
+  ].join("\n");
   const lifecycleSource = await read("packages/cli/src/lifecycle.ts");
   const deployClientSource = await read("packages/deploy-client/src/mod.ts");
   const initSource = await read("packages/cli/src/init.ts");
