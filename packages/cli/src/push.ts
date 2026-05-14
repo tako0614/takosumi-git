@@ -36,12 +36,13 @@ import {
   parseManifestEnvelope,
   postDeployment,
 } from "@takos/takosumi-git-deploy-client";
-import type {
-  ComputeWorkflowRef,
-  ResolvedArtifact,
-  WorkflowEvent,
-  WorkflowFile,
-  WorkflowJobSpec,
+import {
+  type ComputeWorkflowRef,
+  parseWorkflowFile,
+  type ResolvedArtifact,
+  type WorkflowEvent,
+  type WorkflowFile,
+  type WorkflowJobSpec,
 } from "@takos/takosumi-git-workflow-contract";
 import {
   type ArtifactResolver,
@@ -306,9 +307,9 @@ function setResourceProvenanceMetadata(
   entry.metadata = metadata;
 }
 
-async function readYaml<T>(path: string): Promise<T> {
+async function readWorkflowYaml(path: string): Promise<WorkflowFile> {
   const text = await Deno.readTextFile(path);
-  return parseYaml(text) as T;
+  return parseWorkflowFile(parseYaml(text), path);
 }
 
 async function tryReadText(path: string): Promise<string | undefined> {
@@ -370,12 +371,7 @@ export async function push(options: PushOptions): Promise<PushResult> {
       entry.workflowRef.file,
       `resources[${entry.index}].workflowRef.file`,
     );
-    const workflow = await readYaml<WorkflowFile>(workflowPath);
-    if (!isRecord(workflow) || !Array.isArray(workflow.jobs)) {
-      throw new Error(
-        `workflow file ${workflowPath} is missing a 'jobs' array`,
-      );
-    }
+    const workflow = await readWorkflowYaml(workflowPath);
 
     // Capture per-step stdout so the artifact resolver can scan for the
     // TAKOSUMI_ARTIFACT marker. We wrap the executor to push outcomes into
