@@ -9,6 +9,8 @@ Deno.test("install docs cover preview, apply, and commit pins", async () => {
     await read("packages/cli/src/install-parse.ts"),
     await read("packages/cli/src/install-preview.ts"),
     await read("packages/cli/src/install-compile.ts"),
+    await read("packages/cli/src/install-args.ts"),
+    await read("packages/cli/src/install-apply.ts"),
   ].join("\n");
   const lifecycleSource = await read("packages/cli/src/lifecycle.ts");
   const deployClientSource = await read("packages/deploy-client/src/mod.ts");
