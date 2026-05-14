@@ -21,28 +21,25 @@ kind: InstallableApp
 - `kind` は必ず `InstallableApp` の string 一致。他値は parser error です
 - 両 field は document の root に直接置きます。nested は不可です
 
-takosumi-git が pre-1.0 の間は、current v1 spec / parser / tests / docs を同じ
-変更で一貫更新します。public 1.0 後は、新しい optional field の追加は v1 のまま
-行い、field の削除や意味変更が必要なときは `app.takosumi.dev/v2` への bump で
-扱います。
+takosumi-git は current v1 spec / parser / tests / docs
+を同じ変更で一貫更新します。
 
 ---
 
 ## 2. top-level field 一覧
 
-| field           | 必須     | 型           | 概要                                            |
-| --------------- | -------- | ------------ | ----------------------------------------------- |
-| `apiVersion`    | ✅       | string lit.  | `app.takosumi.dev/v1` (§1)                      |
-| `kind`          | ✅       | string lit.  | `InstallableApp` (§1)                           |
-| `metadata`      | ✅       | object       | app の identity / publisher / homepage (§3.1)   |
-| `source`        | ✅       | object       | git URL + ref (+ optional commit) の宣言 (§3.2) |
-| `entry`         | ✅       | object       | authoring manifest path (§3.3)                  |
-| `runtime`       | ✅       | object       | サポートする runtime mode (§3.4)                |
-| `bindings`      | ✅       | object (map) | 要求する resource binding 群 (§3.5)             |
-| `install`       | ✅       | object       | install 完了判定と launch 経路 (§3.6)           |
-| `permissions`   | ✅       | object       | 要求する AppGrant 群 (§3.7)                     |
-| `upgrade`       | optional | object       | upgrade 自動 / 手動 policy (§3.8)               |
-| `compatibility` | optional | object       | takosumi-git / kernel の最小要求 version (§3.9) |
+| field         | 必須     | 型           | 概要                                            |
+| ------------- | -------- | ------------ | ----------------------------------------------- |
+| `apiVersion`  | ✅       | string lit.  | `app.takosumi.dev/v1` (§1)                      |
+| `kind`        | ✅       | string lit.  | `InstallableApp` (§1)                           |
+| `metadata`    | ✅       | object       | app の identity / publisher / homepage (§3.1)   |
+| `source`      | ✅       | object       | git URL + ref (+ optional commit) の宣言 (§3.2) |
+| `entry`       | ✅       | object       | authoring manifest path (§3.3)                  |
+| `runtime`     | ✅       | object       | サポートする runtime mode (§3.4)                |
+| `bindings`    | ✅       | object (map) | 要求する resource binding 群 (§3.5)             |
+| `install`     | ✅       | object       | install 完了判定と launch 経路 (§3.6)           |
+| `permissions` | ✅       | object       | 要求する AppGrant 群 (§3.7)                     |
+| `upgrade`     | optional | object       | upgrade 自動 / 手動 policy (§3.8)               |
 
 ### unknown field
 
@@ -322,23 +319,6 @@ upgrade:
 - `ask`: 新 ref 検出時に Install preview の **upgrade variant** を user
   に提示し、approve を待つ
 - `manual`: 自動検出を行わず、user が明示的に upgrade を発行したとき のみ動く
-
-### 3.9 `compatibility` (optional)
-
-```yaml
-compatibility:
-  takosumi-git: ">=0.4.0"
-  kernel: ">=1.0.0"
-```
-
-| field                        | 必須     | 制約                                                                    |
-| ---------------------------- | -------- | ----------------------------------------------------------------------- |
-| `compatibility.takosumi-git` | optional | semver range。takosumi-git installer 自身の version 要求                |
-| `compatibility.kernel`       | optional | semver range。takosumi kernel manifest envelope の semver compatibility |
-
-不一致時は Install preview で warning、install は **block しません**。
-
----
 
 ## 4. 完全な YAML 例
 

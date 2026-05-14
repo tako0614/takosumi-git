@@ -318,8 +318,8 @@ takosumi-git rollback inst_01J... --to v1.2.3 --accounts-url http://127.0.0.1:87
 
 `--apply` を指定しない場合、どちらも副作用なしで動作します。preview は現在の
 AppInstallation source pin と次の `.takosumi/app.yml` を比較し、manifest digest
-の変化、permission diff、binding diff、migration plan を表示します。`--apply`
-を指定すると、CLI は次のエンドポイントを呼びます。
+の変化、permission diff、binding diff、data-change review
+を表示します。`--apply` を指定すると、CLI は次のエンドポイントを呼びます。
 
 ```text
 POST /v1/installations/{installation-id}/upgrade

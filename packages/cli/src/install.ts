@@ -118,10 +118,6 @@ export interface InstallableApp {
       readonly major?: InstallableAppUpgradePolicy;
     };
   };
-  readonly compatibility?: {
-    readonly "takosumi-git"?: string;
-    readonly kernel?: string;
-  };
 }
 
 export interface InstallableAppBinding {
@@ -196,10 +192,7 @@ export interface InstallPreview {
     readonly reasons: readonly string[];
   };
   readonly approvalRequired: boolean;
-  readonly compatibility: {
-    readonly requirements: Record<string, string>;
-    readonly warnings: readonly string[];
-  };
+  readonly warnings: readonly string[];
 }
 
 export interface PublisherVerificationRecord {
@@ -869,7 +862,6 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
     "install",
     "permissions",
     "upgrade",
-    "compatibility",
   ], issues);
 
   if (input.apiVersion !== INSTALLABLE_APP_API_VERSION) {
@@ -997,7 +989,6 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
   ) as InstallableAppPermission[];
 
   const upgrade = parseUpgrade(input.upgrade, issues);
-  const compatibility = parseCompatibility(input.compatibility, issues);
 
   if (issues.length > 0) throw new InstallableAppValidationError(issues);
   return {
@@ -1022,7 +1013,6 @@ export function parseInstallableAppObject(input: unknown): InstallableApp {
     install: { healthcheckPath, postInstallLaunchPath },
     permissions: { requested },
     ...(upgrade ? { upgrade } : {}),
-    ...(compatibility ? { compatibility } : {}),
   };
 }
 
@@ -1062,34 +1052,6 @@ function parseUpgrade(
     parsed[key] = raw as InstallableAppUpgradePolicy;
   }
   return { policy: parsed };
-}
-
-function parseCompatibility(
-  value: unknown,
-  issues: InstallableAppValidationIssue[],
-): InstallableApp["compatibility"] | undefined {
-  if (value === undefined) return undefined;
-  if (!isRecord(value)) {
-    issues.push({ path: "compatibility", message: "must be an object" });
-    return undefined;
-  }
-  unknownKeys(value, "compatibility", ["takosumi-git", "kernel"], issues);
-  const takosumiGit = optionalStringField(
-    value,
-    "takosumi-git",
-    "compatibility.takosumi-git",
-    issues,
-  );
-  const kernel = optionalStringField(
-    value,
-    "kernel",
-    "compatibility.kernel",
-    issues,
-  );
-  return {
-    ...(takosumiGit ? { "takosumi-git": takosumiGit } : {}),
-    ...(kernel ? { kernel } : {}),
-  };
 }
 
 export function parseInstallableAppYaml(text: string): InstallableApp {
@@ -1166,7 +1128,7 @@ export function buildInstallPreview(
   options: {
     readonly appManifestDigest?: string;
     readonly compiledManifestDigest?: string;
-    readonly compatibilityWarnings?: readonly string[];
+    readonly warnings?: readonly string[];
     readonly now?: Date;
     readonly publisherVerification?: PublisherVerificationRecord;
   } = {},
@@ -1183,11 +1145,6 @@ export function buildInstallPreview(
       binding.type === "object-store.s3-compatible@v1" ||
       binding.type === "domain.http@v1"
     ).length;
-  const requirements: Record<string, string> = {};
-  if (app.compatibility?.["takosumi-git"]) {
-    requirements["takosumi-git"] = app.compatibility["takosumi-git"];
-  }
-  if (app.compatibility?.kernel) requirements.kernel = app.compatibility.kernel;
   const permissionDigest = digestJson({
     bindingKinds: bindings.map((binding) => binding.type).sort(),
     grants: [...app.permissions.requested].sort(),
@@ -1257,10 +1214,7 @@ export function buildInstallPreview(
     },
     risk,
     approvalRequired: risk.level !== "low" || meteredBindingCount > 0,
-    compatibility: {
-      requirements,
-      warnings: options.compatibilityWarnings ?? [],
-    },
+    warnings: options.warnings ?? [],
   };
 }
 
@@ -1324,9 +1278,9 @@ function renderHumanPreview(preview: InstallPreview): string {
   if (preview.source.appManifestDigest) {
     lines.push(`app manifest: ${preview.source.appManifestDigest}`);
   }
-  if (preview.compatibility.warnings.length > 0) {
+  if (preview.warnings.length > 0) {
     lines.push("warnings:");
-    for (const warning of preview.compatibility.warnings) {
+    for (const warning of preview.warnings) {
       lines.push(`  - ${warning}`);
     }
   }
@@ -2056,7 +2010,7 @@ async function loadInstallContext(
         ...(compiledManifest
           ? { compiledManifestDigest: compiledManifest.digest }
           : {}),
-        compatibilityWarnings: warnings,
+        warnings,
       }),
     };
   } finally {

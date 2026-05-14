@@ -69,9 +69,6 @@ upgrade:
     securityPatch: automatic
     minor: ask
     major: manual
-compatibility:
-  takosumi-git: ">=0.4.0"
-  kernel: ">=1.0.0"
 `;
 
 const MANIFEST_YML = `apiVersion: "1.0"
@@ -527,7 +524,7 @@ Deno.test("previewInstall reads app and kernel manifests", async () => {
 
     assert(preview.source.appManifestDigest?.startsWith("sha256:"));
     assert(preview.source.compiledManifestDigest?.startsWith("sha256:"));
-    assertEquals(preview.compatibility.warnings, []);
+    assertEquals(preview.warnings, []);
   } finally {
     await Deno.remove(root, { recursive: true });
   }
@@ -548,7 +545,7 @@ Deno.test("previewInstall warns when entry manifest is absent", async () => {
 
     assertEquals(preview.source.compiledManifestDigest, undefined);
     assertStringIncludes(
-      preview.compatibility.warnings.join("\n"),
+      preview.warnings.join("\n"),
       "entry manifest not found",
     );
   } finally {

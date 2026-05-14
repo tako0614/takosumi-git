@@ -87,7 +87,7 @@ export interface RevisionPreview {
       readonly unchanged: readonly string[];
     };
   };
-  readonly migrationPlan: {
+  readonly dataChangeReview: {
     readonly status: "not-required" | "review-required" | "not-computed";
     readonly notes: readonly string[];
   };
@@ -374,7 +374,7 @@ function buildRevisionPreview(input: {
       permissions: permissionDiff,
       bindings: bindingDiff,
     },
-    migrationPlan: buildMigrationPlan(input.next, bindingDiff),
+    dataChangeReview: buildDataChangeReview(input.next, bindingDiff),
   };
 }
 
@@ -422,20 +422,20 @@ function diffSets(
   return { added, removed, unchanged };
 }
 
-function buildMigrationPlan(
+function buildDataChangeReview(
   next: InstallPreview,
   bindingDiff: { added: readonly string[]; removed: readonly string[] },
-): RevisionPreview["migrationPlan"] {
-  const migrationSensitive = [...bindingDiff.added, ...bindingDiff.removed]
+): RevisionPreview["dataChangeReview"] {
+  const dataSensitive = [...bindingDiff.added, ...bindingDiff.removed]
     .some((entry) =>
       entry.includes(":database.postgres@v1") ||
       entry.includes(":object-store.s3-compatible@v1")
     );
-  if (migrationSensitive) {
+  if (dataSensitive) {
     return {
       status: "review-required",
       notes: [
-        "database or object-store binding changes require provider migration review",
+        "database or object-store binding changes require provider data review",
       ],
     };
   }
@@ -447,7 +447,7 @@ function buildMigrationPlan(
   }
   return {
     status: "not-required",
-    notes: ["no binding-level migration detected"],
+    notes: ["no binding-level data movement detected"],
   };
 }
 
@@ -566,9 +566,9 @@ function renderRevisionResult(result: RevisionResult): string {
     `manifest: ${preview.diff.manifest.changed ? "changed" : "unchanged"}`,
     `permissions: +${preview.diff.permissions.added.length} -${preview.diff.permissions.removed.length}`,
     `bindings: +${preview.diff.bindings.added.length} -${preview.diff.bindings.removed.length}`,
-    `migration: ${preview.migrationPlan.status}`,
+    `data review: ${preview.dataChangeReview.status}`,
   ];
-  for (const note of preview.migrationPlan.notes) {
+  for (const note of preview.dataChangeReview.notes) {
     lines.push(`  - ${note}`);
   }
   if (result.response) {
