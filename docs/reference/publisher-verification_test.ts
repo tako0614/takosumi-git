@@ -9,6 +9,9 @@ Deno.test("publisher verification minimum spec matches preview vocabulary", asyn
     await read("packages/cli/src/install.ts"),
     await read("packages/cli/src/install-parse.ts"),
     await read("packages/cli/src/install-preview.ts"),
+    await read("packages/cli/src/install-compile.ts"),
+    await read("packages/cli/src/install-args.ts"),
+    await read("packages/cli/src/install-apply.ts"),
   ].join("\n");
 
   for (
