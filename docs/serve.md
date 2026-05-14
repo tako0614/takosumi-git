@@ -46,7 +46,7 @@ webhook リクエストは設定された HMAC-SHA256 シークレットで body
 `Tag Push Hook` を受け付けます。`ping` や pull request などの非 push event は
 `202` と `ignored: true` を返し、キューには積みません。event header がない
 request は current implementation では generic push payload として扱いますが、
-pre-GA の固定 public behavior としては扱いません。
+documented serve contract には含めません。
 
 ## キューと重複排除
 
