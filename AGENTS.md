@@ -109,10 +109,10 @@ $EDITOR .takosumi/manifest.yml                                 # resources / ima
 takosumi-git push --endpoint <url> --token <token>             # takosumi に投下
 ```
 
-Note: `takosumi-git init` is the analog of the older `takosumi init --project`
-flow from the era when manifest auto-discovery lived in the takosumi kernel CLI.
-That auto-discovery has been removed from the kernel; the `.takosumi/`
-convention now lives here exclusively.
+The takosumi kernel does not auto-discover repository layouts. The `.takosumi/`
+convention lives here exclusively, and `takosumi-git init` is the current
+scaffold command for authoring installable app metadata, deploy manifests, and
+workflows.
 
 ## 想定 CLI
 
