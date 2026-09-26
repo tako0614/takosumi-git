@@ -57,7 +57,7 @@ step で `failed` 状態に遷移し、AppInstallation には `installing → fa
 compute manifest) は **明確に別物** で、step 4 / 5 で別 parser を
 通す。混同するとビルド出力が kernel に渡らない (kernel は `app.yml`
 を受けない)。 詳細は [.takosumi/app.yml spec](../reference/app-yml-spec.md) と
-[.takosumi/manifest.yml](../../../takosumi/docs/reference/manifest-spec.md)
+[.takosumi/manifest.yml](../../../takosumi/docs/reference/repository-manifest.md)
 を参照。
 
 ## 2. CLI: `takosumi-git install`

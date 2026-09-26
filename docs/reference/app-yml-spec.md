@@ -119,7 +119,7 @@ entry:
 `entry.manifest` で指された file は takosumi-git が compile する authoring
 compute manifest です。kernel に届くのは placeholder / `workflowRef` を除去した
 compiled Shape manifest だけです
-([Manifest Reference](../../../takosumi/docs/reference/manifest-spec.md))。
+([Manifest Reference](../../../takosumi/docs/reference/repository-manifest.md))。
 
 ### 3.4 `runtime`
 
@@ -486,7 +486,7 @@ manifest のみで、`apiVersion: "app.takosumi.dev/v1"` を **知りません**
 
 ## 6. 次に読むページ
 
-- [Manifest Reference](../../../takosumi/docs/reference/manifest-spec.md) —
+- [Manifest Reference](../../../takosumi/docs/reference/repository-manifest.md) —
   compiled Shape manifest の field 定義
 - [OIDC Consumer](../../../takos/docs/apps/oidc-consumer.md) — `bindings.auth`
   (= `identity.oidc@v1`) が Takosumi 上の Takos product runtime に渡す env

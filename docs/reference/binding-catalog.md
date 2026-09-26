@@ -4,7 +4,7 @@
 
 ::: tip 関連ページ installer-only placeholder の解決順は本ページの §8
 が正本です。
-[manifest-spec § 13](../../../takosumi/docs/reference/manifest-spec.md#compile-time-placeholders)
+[manifest-spec § 13](../../../takosumi/docs/reference/repository-manifest.md)
 からも本 §8 を参照します。 :::
 
 `.takosumi/app.yml` の `bindings:` 節で宣言できる binding type の catalog です。
