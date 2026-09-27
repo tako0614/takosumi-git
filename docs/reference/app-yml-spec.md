@@ -79,7 +79,7 @@ metadata:
 
 ```yaml
 source:
-  git: https://github.com/takos/takos
+  git: https://github.com/tako0614/takos
   ref: v1.2.3
   commit: 7f3c9abc... # optional but recommended
 ```
